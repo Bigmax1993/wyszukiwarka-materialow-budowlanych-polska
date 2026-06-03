@@ -6,7 +6,7 @@ Jeden **obrót** pipeline’u na **jedną falę** (~96 zapytań Serper). Cała k
 
 | Dzień | Godzina (propozycja) | Skrypt | Co robi |
 |-------|----------------------|--------|---------|
-| **Środa** | **18:00** | `run_sroda.ps1` | Discovery: Serper + strony www → `Wyniki/de_gu_bauunternehmen_cache.json` |
+| **Środa** | **20:10** | `run_sroda.ps1` | Discovery: Serper + strony www → `Wyniki/de_gu_bauunternehmen_cache.json` |
 | **Czwartek** | 06:00 | `run_czwartek.ps1` | Backfill e-maili + Excel (bez nowego Serpera) |
 | **Piątek** | 09:00 | `run_piatek.ps1` | Wysyłka maili (`--send-emails-only`, okno **8–18** czas niemiecki) |
 
@@ -14,7 +14,7 @@ Jeden **obrót** pipeline’u na **jedną falę** (~96 zapytań Serper). Cała k
 
 - `run_config\welle_nrw_by_bw.json`: `enable_auto_email: false`, `dry_run_email: true` (zostaw na środę).
 - Limit Serper: **300/dzień** — jedna fala mieści się w środę.
-- Start **18:00** — skan trwa wieczorem i w nocy (zwykle **2–8 h**); komputer nie może iść w uśpienie do rana (albo do końca joba).
+- Start **20:10** — skan trwa wieczorem i w nocy (zwykle **2–8 h**); komputer nie może iść w uśpienie do rana (albo do końca joba).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "...\schedule\run_sroda.ps1"
@@ -59,7 +59,7 @@ Usunięcie: `register_tasks_3_dni.ps1 -Unregister`
 
 ## GitHub Actions (opcjonalnie)
 
-Trzy workflow z cronem: `0 16 * * 3`, `30 3 * * 4`, `0 7 * * 5` (UTC ≈ **18:00** środa CEST / 05:30 czw / 09:00 pt) — patrz `.github/workflows/de_gu_wed.yml` itd.
+Trzy workflow z cronem: `10 18 * * 3`, `30 3 * * 4`, `0 7 * * 5` (UTC ≈ **20:10** środa CEST / 05:30 czw / 09:00 pt) — patrz `.github/workflows/de_gu_wed.yml` itd.
 
 ## Pierwszy tydzień kampanii
 

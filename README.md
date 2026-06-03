@@ -86,7 +86,7 @@ Jeden obrót pipeline’u na **jedną falę** (np. NRW+BY+BW). Szczegóły: `../
 
 | Dzień | Godzina | Skrypt |
 |-------|---------|--------|
-| Środa | **18:00** | `../schedule/run_sroda.ps1` — discovery |
+| Środa | **20:10** | `../schedule/run_sroda.ps1` — discovery |
 | Czwartek | 06:00 | `../schedule/run_czwartek.ps1` — backfill + Excel |
 | Piątek | 09:00 | `../schedule/run_piatek.ps1` — `--send-emails-only` (okno 8–18 Berlin) |
 

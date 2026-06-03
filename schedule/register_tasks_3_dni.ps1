@@ -23,7 +23,7 @@ function Register-WeekdayTask {
 }
 
 $tasks = @(
-    @{ Name = "Kanbud_GU_Sroda_Discovery"; Script = Join-Path $ScheduleDir "run_sroda.ps1"; Day = "Wednesday"; Time = "18:00" }
+    @{ Name = "Kanbud_GU_Sroda_Discovery"; Script = Join-Path $ScheduleDir "run_sroda.ps1"; Day = "Wednesday"; Time = "20:10" }
     @{ Name = "Kanbud_GU_Czwartek_Backfill"; Script = Join-Path $ScheduleDir "run_czwartek.ps1"; Day = "Thursday"; Time = "06:00" }
     @{ Name = "Kanbud_GU_Piatek_Send"; Script = Join-Path $ScheduleDir "run_piatek.ps1"; Day = "Friday"; Time = "09:00" }
 )

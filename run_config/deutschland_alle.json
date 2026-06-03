@@ -1,0 +1,25 @@
+{
+  "config_type": "de_gu_filialbau",
+  "lang": "de",
+  "active_bundeslaender": [
+    "Nordrhein-Westfalen",
+    "Bayern",
+    "Baden-Wuerttemberg",
+    "Niedersachsen",
+    "Hessen",
+    "Sachsen",
+    "Rheinland-Pfalz",
+    "Berlin",
+    "Brandenburg",
+    "Schleswig-Holstein",
+    "Thueringen",
+    "Sachsen-Anhalt",
+    "Mecklenburg-Vorpommern",
+    "Hamburg",
+    "Bremen",
+    "Saarland"
+  ],
+  "min_contacts_target": 300,
+  "enable_auto_email": false,
+  "dry_run_email": true
+}

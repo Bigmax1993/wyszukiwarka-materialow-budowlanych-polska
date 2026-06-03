@@ -1,0 +1,7 @@
+{
+  "config_type": "de_gu_filialbau",
+  "lang": "de",
+  "active_bundeslaender": ["Nordrhein-Westfalen"],
+  "min_contacts_target": 80,
+  "enable_auto_email": false
+}

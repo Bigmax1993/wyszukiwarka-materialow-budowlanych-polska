@@ -1,0 +1,46 @@
+﻿name: Sync wyniki Google Drive
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Piątek 12:00 UTC ≈ 14:00 PL — po porannym pipeline wysyłki
+    - cron: "0 12 * * 5"
+  workflow_run:
+    workflows: ["GU piatek send"]
+    types: [completed]
+
+env:
+  GDRIVE_FOLDER_ID: "1tP8oUi72t4EHDbE9GnHFdvfNtNsJe4xf"
+  KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Drive API
+        run: pip install -r requirements-drive.txt
+
+      - name: Download campaign artifacts (optional)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: de-gu-wyniki
+          path: Gu Baunterhnehmen
+
+      - name: Upload Wyniki to Google Drive
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$GDRIVE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Brak secret GDRIVE_SERVICE_ACCOUNT_JSON — pomin upload. Zobacz docs/GITHUB_REPO_DRIVE.md"
+            exit 0
+          fi
+          mkdir -p "Wyniki" "wyslane" 2>/dev/null || true
+          export KANBUD_DATA_DIR="${{ github.workspace }}/Gu Baunterhnehmen"
+          python scripts/gdrive_upload_wyniki.py --campaign-dir "Gu Baunterhnehmen"

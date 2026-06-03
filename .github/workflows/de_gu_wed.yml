@@ -1,0 +1,29 @@
+﻿name: GU sroda discovery
+
+on:
+  schedule:
+    # 16:00 UTC = 18:00 Europe/Warsaw (CEST); zimą (CET) ustaw 17:00 UTC
+    - cron: "0 16 * * 3"
+  workflow_dispatch:
+
+env:
+  SCRAPER_TIMEZONE: Europe/Warsaw
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+
+    env:
+      KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Discovery
+        
+        env:
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+                  run: python de_gu_bauunternehmen_scraper.py --run-config run_config/welle_nrw_by_bw.json

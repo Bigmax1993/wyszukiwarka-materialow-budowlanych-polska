@@ -7,24 +7,47 @@ on:
 
 env:
   SCRAPER_TIMEZONE: Europe/Berlin
+  KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+  SMTP_HOST: ragakomputer.home.pl
+  SMTP_PORT: "465"
+  SMTP_SSL: "1"
+  IMAP_HOST: ragakomputer.home.pl
+  IMAP_PORT: "993"
+  IMAP_SSL: "1"
+  MAIL_ARCHIVE_IMAP: "1"
 
 jobs:
   send:
     runs-on: ubuntu-latest
-
-    env:
-      KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - run: pip install -r requirements.txt
+
+      - name: Download cache from czwartek
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: de-gu-wyniki-thu
+          path: .
+
       - name: Send emails only
-        
         env:
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-                  run: python de_gu_bauunternehmen_scraper.py --send-emails-only
+        run: python de_gu_bauunternehmen_scraper.py --send-emails-only
+
+      - name: Upload Wyniki artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: de-gu-wyniki-fri
+          path: |
+            Wyniki/
+            wyslane/

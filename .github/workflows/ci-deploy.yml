@@ -21,7 +21,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install chromium --with-deps
 
       - name: Smoke tests
         run: python de_gu_bauunternehmen_scraper.py --test
@@ -45,4 +47,3 @@ jobs:
         env:
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
         run: python de_gu_bauunternehmen_scraper.py --dry-run-email --send-emails-only
-        continue-on-error: true

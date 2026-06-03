@@ -41,7 +41,7 @@ function Test-ServiceAccountJson([string]$Path) {
 }
 
 function Find-DownloadedKey {
-    $dl = [Environment]::GetFolderPath("Downloads")
+    $dl = Join-Path $env:USERPROFILE "Downloads"
     Get-ChildItem $dl -Filter "*.json" -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending |
         ForEach-Object {

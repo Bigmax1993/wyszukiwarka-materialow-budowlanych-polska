@@ -28,8 +28,14 @@ Folder może być **pusty** przed pierwszym uruchomieniem scrapera — pliki pow
 1. [Google Cloud Console](https://console.cloud.google.com/) → projekt → włącz **Google Drive API**.
 2. **Administracja → Konta usługi** → utwórz konto (np. `gu-wyniki-upload`) → **Klucze** → **JSON** (pobierz plik).
 3. **Nie używaj** klucza API (`AIza...`) z sekcji „Dane logowania” — potrzebny jest **plik JSON** z `type: service_account`.
-4. W Google Drive: folder wyników → **Udostępnij** → e-mail z JSON (`...@....iam.gserviceaccount.com`) → **Edytor**.
-5. GitHub: secret **`GDRIVE_SERVICE_ACCOUNT_JSON`** = cała treść pliku JSON.
+4. **GitHub Actions (wymagane):** konto usługowe **nie ma własnej przestrzeni** na „Moim dysku”.
+   - Utwórz **dysk współdzielony** (Shared Drive) w Google Workspace.
+   - Dodaj e-mail konta usługi (`...@....iam.gserviceaccount.com`) jako **Content manager** (Zarządzanie treścią).
+   - Skrypt sam utworzy folder `GU Bauunternehmen Wyniki` i wgra pliki (albo użyje folderu, jeśli już jest na Shared Drive).
+   - Opcjonalnie: secret **`GDRIVE_SHARED_DRIVE_ID`** = ID dysku (z URL dysku współdzielonego).
+   - Alternatywa (Workspace): delegacja domeny + secret **`GDRIVE_IMPERSONATE_EMAIL`** = Twój e-mail firmowy.
+5. Folder na „Moim dysku” możesz nadal udostępnić do podglądu; upload z CI i tak trafi na Shared Drive.
+6. GitHub: secret **`GDRIVE_SERVICE_ACCOUNT_JSON`** = cała treść pliku JSON.
 
 ### Automatyczny setup secretu (PC)
 
@@ -54,4 +60,6 @@ Moduł: `mfg_gu_email_attachment.py` — **wysyłka bez PPTX kończy się błęd
 | `GDRIVE_SERVICE_ACCOUNT_JSON` | Treść JSON (GitHub Actions / env) |
 | `GDRIVE_SERVICE_ACCOUNT_FILE` | Ścieżka do pliku JSON (lokalnie) |
 | `GDRIVE_FOLDER_ID` | Domyślnie ID folderu GU powyżej |
+| `GDRIVE_SHARED_DRIVE_ID` | ID dysku współdzielonego (opcjonalnie) |
+| `GDRIVE_IMPERSONATE_EMAIL` | E-mail użytkownika Workspace — delegacja DWD (opcjonalnie) |
 | `KANBUD_GOOGLE_DRIVE_GU_PATH` | Lokalna ścieżka Drive for desktop |

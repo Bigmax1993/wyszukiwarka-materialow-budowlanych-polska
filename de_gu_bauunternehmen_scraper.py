@@ -1647,6 +1647,34 @@ def save_cache(cache: dict, logger: logging.Logger) -> None:
         logger.error(f"Cache-Schreibfehler: {e}")
 
 
+def contact_validation_fields(
+    info: dict | None, place_url: str = ""
+) -> tuple[str, str, str, str]:
+    """Spójny kontekst dla is_valid_retail_store_builder_contact (kolejka + wysyłka)."""
+    if not isinstance(info, dict):
+        info = {}
+    email = (info.get("email_target") or "").strip()
+    url = (info.get("official_website") or place_url or "").strip()
+    name = (
+        info.get("company_name_clean")
+        or info.get("company_name")
+        or info.get("company_name_raw")
+        or ""
+    ).strip()
+    text = " ".join(
+        str(info.get(k) or "")
+        for k in (
+            "verification_reason",
+            "page_snippet",
+            "retail_chains",
+            "retail_chains_found",
+            "serper_title",
+            "serper_snippet",
+        )
+    )
+    return email, url, name, text
+
+
 def build_email_jobs_from_cache_json(
     logger: logging.Logger, *, force_resend: bool = False
 ):
@@ -1671,14 +1699,12 @@ def build_email_jobs_from_cache_json(
             continue
         if contact_info_excluded(info, place_url):
             continue
+        _em, _url, _name, _text = contact_validation_fields(info, place_url)
         if not is_valid_retail_store_builder_contact(
             email=email_target,
-            url=place_url,
-            name=info.get("company_name") or info.get("company_name_clean") or "",
-            text=" ".join(
-                str(info.get(k) or "")
-                for k in ("verification_reason", "page_snippet", "retail_chains")
-            ),
+            url=_url,
+            name=_name,
+            text=_text,
         ):
             continue
         if email_status == "sent" and not force_resend:
@@ -4039,9 +4065,15 @@ def _process_email_jobs(
     else:
         jobs_to_send = email_jobs[:remaining]
         jobs_deferred = email_jobs[remaining:]
+    contacts_cache = cache.get("contacts", {})
     for mail in jobs_to_send:
         target = mail["email_target"]
         domain = get_email_domain(target)
+        place_url = mail.get("place_url", "")
+        contact_info = contacts_cache.get(place_url, {})
+        _em, val_url, val_name, val_text = contact_validation_fields(
+            contact_info, place_url
+        )
         if (
             not force_resend
             and was_email_target_sent_today(cache, target)
@@ -4051,12 +4083,13 @@ def _process_email_jobs(
             status = f"suppressed_role_based_{today}"
         elif not is_valid_retail_store_builder_contact(
             email=target,
-            url=mail.get("place_url", ""),
-            name=mail.get("company_name", ""),
+            url=val_url,
+            name=val_name,
+            text=val_text,
         ):
             status = f"suppressed_not_store_builder_{today}"
             mark_suppressed_target(cache, target, "not_store_builder")
-        elif is_suppressed_target(cache, target):
+        elif not force_resend and is_suppressed_target(cache, target):
             status = f"suppressed_cached_{today}"
         elif not ignore_send_window and not is_within_send_window():
             status = f"deferred_send_window_{today}"
@@ -4069,10 +4102,13 @@ def _process_email_jobs(
         else:
             status = None
         if status:
+            logger.info("E-mail übersprungen %s: %s", target, status)
             cache.setdefault("contacts", {}).setdefault(mail["place_url"], {})[
                 "email_status"
             ] = status
             continue
+        if force_resend:
+            cache.setdefault("email_suppression", {}).pop(target.lower(), None)
         subject, body = generate_email_content_gemini(
             mail.get("company_name", "Firma"), logger, cache=cache
         )

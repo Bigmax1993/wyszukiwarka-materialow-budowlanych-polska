@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 7 * * 5"
   workflow_dispatch:
+    inputs:
+      force_resend:
+        description: Ponowna wysylka (ignoruj suppression i sent)
+        type: boolean
+        default: true
 
 permissions:
   actions: read
@@ -66,7 +71,12 @@ jobs:
           GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
           GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
           GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
-        run: python de_gu_bauunternehmen_scraper.py --send-emails-only
+        run: |
+          ARGS="--send-emails-only"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_resend }}" = "true" ]; then
+            ARGS="$ARGS --force-resend"
+          fi
+          python de_gu_bauunternehmen_scraper.py $ARGS
 
       - name: Upload Wyniki artifact
         if: always()

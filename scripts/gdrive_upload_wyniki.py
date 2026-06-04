@@ -46,7 +46,36 @@ _LIST_OPTS = {
 _GU_FOLDER_NAME = "GU Bauunternehmen Wyniki"
 
 
-def _load_credentials():
+def _load_oauth_credentials():
+    refresh = (os.environ.get("GDRIVE_OAUTH_REFRESH_TOKEN") or "").strip()
+    if not refresh:
+        return None
+    client_id = (os.environ.get("GDRIVE_OAUTH_CLIENT_ID") or "").strip()
+    client_secret = (os.environ.get("GDRIVE_OAUTH_CLIENT_SECRET") or "").strip()
+    if not client_id or not client_secret:
+        raise SystemExit(
+            "Ustaw GDRIVE_OAUTH_CLIENT_ID i GDRIVE_OAUTH_CLIENT_SECRET "
+            "(uruchom scripts/gdrive_oauth_setup.py)."
+        )
+    try:
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+    except ImportError as e:
+        raise SystemExit("pip install google-auth\n" + str(e)) from e
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=list(SCOPES),
+    )
+    creds.refresh(Request())
+    return creds
+
+
+def _load_service_account_credentials():
     try:
         from google.oauth2 import service_account
     except ImportError as e:
@@ -86,6 +115,14 @@ def _load_credentials():
         creds = creds.with_subject(impersonate)
         print(f"Delegacja DWD: upload w imieniu {impersonate}")
     return creds
+
+
+def _load_credentials():
+    oauth = _load_oauth_credentials()
+    if oauth is not None:
+        print("OAuth: upload na Twoj Dysk Google (folder udostepniony uzytkownikowi)")
+        return oauth, True
+    return _load_service_account_credentials(), False
 
 
 def _drive_service(creds):
@@ -177,10 +214,10 @@ def _resolve_shared_drive_upload_folder(service, preferred_folder_id: str) -> tu
         print(f"Shared Drive: {drives[0].get('name', shared_drive_id)}")
     else:
         raise SystemExit(
-            "Konto uslugowe nie widzi zadnego Shared Drive. "
-            "Utworz dysk wspoldzielony w Google Workspace, dodaj tam "
-            "e-mail konta uslugowego (Edytor / Content manager), "
-            "opcjonalnie ustaw secret GDRIVE_SHARED_DRIVE_ID."
+            "Konto uslugowe nie widzi zadnego Shared Drive.\n"
+            "Najprosciej: uruchom na PC  python scripts/gdrive_oauth_setup.py\n"
+            "(OAuth na Twoj folder — bez Shared Drive).\n"
+            "Albo: dysk wspoldzielony + e-mail konta uslugowego jako Content manager."
         )
 
     try:
@@ -203,8 +240,11 @@ def _resolve_shared_drive_upload_folder(service, preferred_folder_id: str) -> tu
     return created, shared_drive_id
 
 
-def _resolve_upload_folder(service, folder_id: str) -> str:
-    """Ustal folder, do którego można uploadować (Shared Drive lub impersonacja)."""
+def _resolve_upload_folder(service, folder_id: str, *, use_oauth: bool) -> str:
+    """Ustal folder, do którego można uploadować (OAuth / Shared Drive / impersonacja)."""
+    if use_oauth:
+        print(f"OAuth -> folder {folder_id}")
+        return folder_id
     try:
         meta = _folder_metadata(service, folder_id)
         if meta.get("driveId"):
@@ -294,10 +334,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    creds = _load_credentials()
+    creds, use_oauth = _load_credentials()
     service, MediaFileUpload = _drive_service(creds)
     data_root = resolve_data_root(args.campaign_dir)
-    upload_folder_id = _resolve_upload_folder(service, args.folder_id)
+    upload_folder_id = _resolve_upload_folder(service, args.folder_id, use_oauth=use_oauth)
 
     total = 0
     w = wyniki_dir(data_root)

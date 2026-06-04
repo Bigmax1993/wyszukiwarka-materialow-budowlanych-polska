@@ -81,6 +81,8 @@ jobs:
       - name: Upload Wyniki to Google Drive
         env:
           GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_IMPERSONATE_EMAIL: ${{ secrets.GDRIVE_IMPERSONATE_EMAIL }}
+          GDRIVE_SHARED_DRIVE_ID: ${{ secrets.GDRIVE_SHARED_DRIVE_ID }}
         run: |
           mkdir -p Wyniki wyslane 2>/dev/null || true
           python scripts/gdrive_upload_wyniki.py --campaign-dir .

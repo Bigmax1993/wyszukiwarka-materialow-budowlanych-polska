@@ -5061,9 +5061,5 @@ if __name__ == "__main__":
             launch_kw.update(extra_kw)
             run_scraper(jupyter_mode=is_running_in_jupyter(), **launch_kw)
         else:
-            run_scraper(
-                jupyter_mode=is_running_in_jupyter(),
-                rotate_bundesland=rotate_bl,
-                **extra_kw,
-            )
+            run_scraper(jupyter_mode=is_running_in_jupyter(), **extra_kw)
 

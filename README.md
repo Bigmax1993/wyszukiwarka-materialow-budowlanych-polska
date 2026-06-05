@@ -109,7 +109,7 @@ Setup Drive: `scripts/setup_gdrive_github_secret.ps1` lub [`docs/GOOGLE_DRIVE.md
 
 - Treść: `mfg_gu_inquiry_email_de.py`  
 - Załącznik PPTX: `mfg_gu_email_attachment.py` (Google Slides → PPTX; bez pliku lokalnego wysyłka się nie powiedzie)  
-- Cc: `office@mfg-fliesen.de` (`mfg_mail_recipients.py`)
+- Cc: tylko z `MAIL_CC` w `.env` (bez automatycznego `office@mfg-fliesen.de`)
 
 ## Struktura repo
 

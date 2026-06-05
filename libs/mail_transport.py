@@ -124,8 +124,8 @@ def _split_recipients(raw: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-# Ukryta/widoczna kopia — dołączana przy każdej wysyłce SMTP (oprócz MAIL_CC z .env)
-EMAIL_ALWAYS_CC: tuple[str, ...] = ("office@mfg-fliesen.de",)
+# Opcjonalna stała Cc — pusta; użyj MAIL_CC w .env jeśli potrzebujesz kopii.
+EMAIL_ALWAYS_CC: tuple[str, ...] = ()
 
 
 def merge_mail_cc_recipients(primary_to: str, extra_env_cc: str = "") -> list[str]:

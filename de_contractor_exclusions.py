@@ -108,6 +108,7 @@ EXCLUDED_EMAIL_DOMAINS_EXACT: frozenset[str] = frozenset(
 )
 
 EXCLUDED_DOMAIN_FRAGMENTS: tuple[str, ...] = (
+    "hi-heute.de",
     "neula.de",
     "xpress-bau",
     "slb-bautzen",

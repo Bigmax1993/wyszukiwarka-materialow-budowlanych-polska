@@ -57,6 +57,7 @@ from de_gu_keywords import (
     GU_ROLE_KEYWORDS,
     RETAIL_REFERENCE_KEYWORDS,
     RETAIL_URL_PRIORITY_KEYWORDS,
+    SERPER_DISCOVERY_BROAD_TERMS,
     SERPER_DISCOVERY_FALLBACK_TERMS,
     SERPER_DISCOVERY_REGION_SUFFIX,
     SERPER_DISCOVERY_TERMS,
@@ -138,6 +139,8 @@ from commercial_contact_filter import (
 from retail_store_builder_filter import (
     has_retail_references_or_portfolio,
     is_cache_contact_not_store_builder,
+    is_loose_serper_discovery_candidate,
+    is_media_publisher_contact,
     is_retail_store_operator_contact,
     is_valid_retail_store_builder_contact,
     mentions_retail_store_build_activity,
@@ -1448,6 +1451,17 @@ def index_all_rows_by_url(all_rows: list[dict]) -> dict[str, dict]:
         url = str(row.get("url") or "").strip()
         if url:
             out[url] = row
+    return out
+
+
+def index_all_rows_by_domain(all_rows: list[dict]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for row in all_rows:
+        dom = get_registrable_domain(
+            str(row.get("url") or row.get("www") or row.get("official_website") or "")
+        )
+        if dom and dom not in out:
+            out[dom] = row
     return out
 
 
@@ -3353,7 +3367,7 @@ def discover_places_with_serper(
                 continue
             title = (item.get("title") or "").strip()
             snippet = (item.get("snippet") or "").strip()
-            if not is_valid_retail_store_builder_contact(
+            if not is_loose_serper_discovery_candidate(
                 url=link, name=title, text=f"{title} {snippet}"
             ):
                 continue
@@ -4438,6 +4452,17 @@ def enrich_row_with_contacts(
     return row
 
 
+def _discovery_target_reached(
+    all_rows: list,
+    *,
+    total_new_rows: int,
+    rotate_mode: bool,
+) -> bool:
+    if rotate_mode:
+        return total_new_rows >= MIN_CONTACTS_TARGET
+    return len(all_rows) >= MIN_CONTACTS_TARGET
+
+
 def _process_serper_terms(
     terms: list[str],
     label: str,
@@ -4451,9 +4476,11 @@ def _process_serper_terms(
     max_new_rows: int | None,
     total_new_rows: int,
     stop_requested: bool,
+    rotate_mode: bool = False,
 ) -> tuple[int, bool]:
     """Zwraca (total_new_rows, stop_requested) po przetworzeniu listy fraz Serper."""
     by_url = index_all_rows_by_url(all_rows)
+    by_domain = index_all_rows_by_domain(all_rows)
     for term in terms:
         if stop_requested:
             break
@@ -4464,10 +4491,15 @@ def _process_serper_terms(
         added = 0
         refreshed = 0
         for r in rows:
-            url = (r.get("url") or "").strip()
-            if not url:
+            raw_url = (r.get("url") or "").strip()
+            if not raw_url:
                 continue
-            existing = by_url.get(url)
+            dom = get_registrable_domain(raw_url)
+            base_url = website_base_url(raw_url)
+            url = base_url or raw_url
+            r["url"] = url
+            r["www"] = url
+            existing = by_url.get(url) or (by_domain.get(dom) if dom else None)
             if existing and not DISCOVERY_IGNORE_CONTACT_CACHE and url in seen_global:
                 continue
             if AUTO_ENRICH_CONTACTS:
@@ -4511,12 +4543,16 @@ def _process_serper_terms(
                 r["email_status"] = "queued"
                 cache.setdefault("contacts", {}).setdefault(url, {})["email_status"] = "queued"
             seen_global.add(url)
+            if dom:
+                seen_global.add(dom)
             if existing:
                 existing.update(r)
                 refreshed += 1
             else:
                 all_rows.append(r)
                 by_url[url] = r
+                if dom:
+                    by_domain[dom] = r
                 added += 1
                 total_new_rows += 1
             if max_new_rows is not None and total_new_rows >= max_new_rows:
@@ -4525,9 +4561,16 @@ def _process_serper_terms(
         suffix = f", odświeżono {refreshed}" if refreshed else ""
         print(f"{term}: +{added}{suffix}")
         persist_progress(all_rows, cache, logger, reason=f"Ende {term}")
-        if len(all_rows) >= MIN_CONTACTS_TARGET:
+        if _discovery_target_reached(
+            all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+        ):
+            metric = (
+                f"{total_new_rows} nowych"
+                if rotate_mode
+                else f"{len(all_rows)} łącznie"
+            )
             console_step(
-                f"Cel osiągnięty: {len(all_rows)} kontaktów (target {MIN_CONTACTS_TARGET})"
+                f"Cel osiągnięty: {metric} (target {MIN_CONTACTS_TARGET})"
             )
             break
     return total_new_rows, stop_requested
@@ -4547,8 +4590,16 @@ def run_scraper(
 ):
     if jupyter_mode is None:
         jupyter_mode = is_running_in_jupyter()
+    auto_email_explicit = enable_auto_email is not None
     if enable_auto_email is None:
         enable_auto_email = ENABLE_AUTO_EMAIL
+    rotate_mode = bool(rotate_bundesland and discovery_mode != "emails_only")
+    if rotate_mode and enable_auto_email and not auto_email_explicit:
+        enable_auto_email = False
+        console_step(
+            "Rotacja Bundesland: wysyłka maili wyłączona w discovery "
+            "(użyj --with-auto-email aby wymusić)."
+        )
 
     logger = setup_logging()
     deprecated = [k for k in _deprecated_kwargs if _deprecated_kwargs.get(k) is not None]
@@ -4577,7 +4628,7 @@ def run_scraper(
         )
         print(
             f"[ROTACJA] Discovery dla Bundesland: {rotation_land} "
-            f"(1 land / cykl, min. kontaktów={MIN_CONTACTS_TARGET})"
+            f"(1 land / cykl, min. nowych firm={MIN_CONTACTS_TARGET})"
         )
         print(f"[ROTACJA] {format_rotation_status(OUTPUT_DIR)}")
 
@@ -4594,7 +4645,10 @@ def run_scraper(
     )
     if max_new_rows is not None:
         print(f"[LIMIT] max. nowych wierszy: {max_new_rows}")
-    print(f"[TARGET] min. kontaktów: {MIN_CONTACTS_TARGET}")
+    if rotate_mode:
+        print(f"[TARGET] min. nowych firm w tym runie: {MIN_CONTACTS_TARGET}")
+    else:
+        print(f"[TARGET] min. kontaktów: {MIN_CONTACTS_TARGET}")
 
     cache = load_cache(logger)
     if rebuild_from_cache:
@@ -4642,10 +4696,14 @@ def run_scraper(
                 max_new_rows=max_new_rows,
                 total_new_rows=total_new_rows,
                 stop_requested=stop_requested,
+                rotate_mode=rotate_mode,
             )
-            if not stop_requested and len(all_rows) < MIN_CONTACTS_TARGET:
+            if not stop_requested and not _discovery_target_reached(
+                all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+            ):
+                metric = total_new_rows if rotate_mode else len(all_rows)
                 console_step(
-                    f"Za mało kontaktów ({len(all_rows)}). Fallback Serper bez filtra odległości."
+                    f"Za mało kontaktów ({metric}). Fallback Serper bez filtra odległości."
                 )
                 total_new_rows, stop_requested = _process_serper_terms(
                     SERPER_DISCOVERY_FALLBACK_TERMS,
@@ -4659,6 +4717,35 @@ def run_scraper(
                     max_new_rows=max_new_rows,
                     total_new_rows=total_new_rows,
                     stop_requested=stop_requested,
+                    rotate_mode=rotate_mode,
+                )
+            if not stop_requested and not _discovery_target_reached(
+                all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+            ):
+                metric = total_new_rows if rotate_mode else len(all_rows)
+                console_step(
+                    f"Za mało kontaktów ({metric}). Broad Serper — krótkie frazy."
+                )
+                total_new_rows, stop_requested = _process_serper_terms(
+                    SERPER_DISCOVERY_BROAD_TERMS,
+                    "broad",
+                    all_rows=all_rows,
+                    seen_global=seen_global,
+                    cache=cache,
+                    logger=logger,
+                    enable_auto_email=enable_auto_email,
+                    apply_distance_filter=False,
+                    max_new_rows=max_new_rows,
+                    total_new_rows=total_new_rows,
+                    stop_requested=stop_requested,
+                    rotate_mode=rotate_mode,
+                )
+            if rotate_mode and not _discovery_target_reached(
+                all_rows, total_new_rows=total_new_rows, rotate_mode=True
+            ):
+                console_step(
+                    f"Uwaga: znaleziono tylko {total_new_rows} nowych firm "
+                    f"(cel {MIN_CONTACTS_TARGET}). Następny land w kolejnej rotacji."
                 )
 
         if enable_auto_email:
@@ -4853,6 +4940,23 @@ def _run_smoke_tests() -> None:
         name="REWE Markt",
         text="Öffnungszeiten Prospekt Filialfinder",
     )
+    assert is_media_publisher_contact(
+        url="https://www.hi-heute.de/supermarkte_und_discounter",
+        name="hi-heute.de Verlag Business News",
+        email="redaktion@hi-heute.de",
+    )
+    assert not is_loose_serper_discovery_candidate(
+        url="https://www.hi-heute.de/supermarkte_und_discounter",
+        name="hi-heute.de Verlag",
+        text="Netto Discounter Supermarkt Nachrichten",
+    )
+    from de_gu_keywords import (
+        SERPER_DISCOVERY_BROAD_TERMS,
+        build_region_suffix,
+    )
+
+    assert build_region_suffix(["Nordrhein-Westfalen"]) == "Deutschland"
+    assert len(SERPER_DISCOVERY_BROAD_TERMS) >= 10
     assert is_unsuitable_inquiry_email("privacy@firma.de")
     best, sc = pick_best_email_for_inquiry(
         ["datenschutz@obi.de", "info@logmar.net"],
@@ -5051,7 +5155,12 @@ if __name__ == "__main__":
         rotate_bl = "--rotate-bundesland" in sys.argv
         if rotate_bl:
             extra_kw["rotate_bundesland"] = True
+            if "--with-auto-email" in sys.argv:
+                extra_kw["enable_auto_email"] = True
             print("[TRYB] Rotacja Bundesland: 1 land na cykl discovery.")
+        if "--no-auto-email" in sys.argv:
+            extra_kw["enable_auto_email"] = False
+            print("[TRYB] Wysyłka maili wyłączona w tym uruchomieniu.")
         if rc_path:
             from scraper_run_config import apply_run_config_file, run_scraper_launch_kwargs
 

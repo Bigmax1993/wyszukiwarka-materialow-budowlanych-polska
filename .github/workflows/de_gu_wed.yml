@@ -57,7 +57,7 @@ jobs:
       - name: Discovery (rotacja 1 Bundesland)
         env:
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
-        run: python de_gu_bauunternehmen_scraper.py --rotate-bundesland
+        run: python de_gu_bauunternehmen_scraper.py --rotate-bundesland --no-auto-email
 
       - name: Upload Wyniki artifact
         if: always()

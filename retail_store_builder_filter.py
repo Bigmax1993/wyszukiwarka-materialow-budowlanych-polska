@@ -228,6 +228,45 @@ MARKET_PROJECT_IN_PORTFOLIO_MARKERS = (
     "nahversorger",
 )
 
+MEDIA_PUBLISHER_DOMAIN_MARKERS = (
+    "hi-heute.de",
+    "funkemedien",
+    "verlag",
+    "redaktion.",
+    "business-news",
+    "fachzeitung",
+    "fachmedien",
+    "presseportal",
+    "nachrichten.",
+    "news-medien",
+    "magazin.",
+    "branchennews",
+    "branchenportal",
+)
+
+MEDIA_PUBLISHER_NAME_MARKERS = (
+    "verlag ",
+    " verlag",
+    "redaktion",
+    "fachmedium",
+    "fachzeitschrift",
+    "nachrichten",
+    "news group",
+    "business news",
+    "business media",
+    "pressemitteilung",
+    "fachportal",
+)
+
+MEDIA_PUBLISHER_URL_PATH_MARKERS = (
+    "/news/",
+    "/nachrichten/",
+    "/artikel/",
+    "/newsletter/",
+    "/magazin/",
+    "/supermarkte_und_discounter",
+)
+
 PURE_RENOVATION_WITHOUT_STORE_BUILD = (
     "altbausanierung",
     "wohnsanierung",
@@ -251,6 +290,28 @@ def is_gu_or_retail_build_specialist(text: str) -> bool:
     if any(m in low for m in GU_BUILDER_MARKERS):
         return True
     return any(m in low for m in FILIALBAU_SPECIALIST_MARKERS)
+
+
+def is_media_publisher_contact(
+    *,
+    url: str = "",
+    email: str = "",
+    name: str = "",
+    text: str = "",
+) -> bool:
+    """True = medium / wydawca / portal branżowy, nie Bauunternehmen."""
+    low = _blob(name, url, email, text)
+    if any(m in low for m in MEDIA_PUBLISHER_NAME_MARKERS):
+        return True
+    url_low = (url or "").lower()
+    if any(m in url_low for m in MEDIA_PUBLISHER_DOMAIN_MARKERS):
+        return True
+    if any(m in url_low for m in MEDIA_PUBLISHER_URL_PATH_MARKERS):
+        return True
+    email_low = (email or "").strip().lower()
+    if email_low.startswith("redaktion@"):
+        return True
+    return False
 
 
 def is_retail_store_operator_contact(
@@ -422,6 +483,29 @@ def mentions_retail_store_build_activity(text: str) -> bool:
     return has_retail_references_or_portfolio(low)
 
 
+def is_loose_serper_discovery_candidate(
+    *,
+    email: str = "",
+    url: str = "",
+    name: str = "",
+    text: str = "",
+) -> bool:
+    """
+    Lżejszy filtr na etapie Serper (tytuł/snippet).
+    Wymaga GU/Filialbau + kontekst EH; bez wymogu portfolio (to sprawdza www).
+    """
+    combined = _blob(name, url, email, text)
+    if is_non_commercial_contact(email=email, url=url, name=name):
+        return False
+    if is_media_publisher_contact(email=email, url=url, name=name, text=combined):
+        return False
+    if is_retail_store_operator_contact(url=url, email=email, text=combined):
+        return False
+    if not is_valid_commercial_company_contact(email=email, url=url, name=name):
+        return False
+    return mentions_retail_store_build_activity_core(combined)
+
+
 def is_valid_retail_store_builder_contact(
     *,
     email: str = "",
@@ -432,6 +516,8 @@ def is_valid_retail_store_builder_contact(
     """GU / Bauunternehmen budujące lub przebudowujące sklepy i markety."""
     combined = _blob(name, url, email, text)
     if is_non_commercial_contact(email=email, url=url, name=name):
+        return False
+    if is_media_publisher_contact(email=email, url=url, name=name, text=combined):
         return False
     if is_retail_store_operator_contact(url=url, email=email, text=combined):
         return False

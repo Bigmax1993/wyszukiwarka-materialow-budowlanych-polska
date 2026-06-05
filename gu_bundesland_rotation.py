@@ -17,7 +17,7 @@ from de_gu_keywords import BUNDESLAND_CONFIG, configure_campaign_bundeslaender
 BUNDESLAND_ROTATION_ORDER: tuple[str, ...] = tuple(BUNDESLAND_CONFIG.keys())
 
 STATE_FILENAME = "de_gu_bundeslaender_rotation.json"
-DEFAULT_MIN_CONTACTS_SINGLE_LAND = 50
+DEFAULT_MIN_CONTACTS_SINGLE_LAND = 20
 
 
 def rotation_state_path(wyniki_dir: Path) -> Path:
@@ -61,7 +61,7 @@ def apply_rotation_to_module(
     wyniki_dir: Path,
     *,
     min_contacts: int = DEFAULT_MIN_CONTACTS_SINGLE_LAND,
-    max_discovery_terms: int = 96,
+    max_discovery_terms: int = 120,
 ) -> tuple[str, dict[str, Any], Path]:
     """Wybiera bieżący land (bez przesunięcia indeksu) i konfiguruje scraper."""
     state_path = rotation_state_path(wyniki_dir)

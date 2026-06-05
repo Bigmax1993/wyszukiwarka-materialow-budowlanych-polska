@@ -59,7 +59,7 @@ cd Wyszukiwarka-partnerow
 
 ## Załącznik PPTX (poniedziałek/wtorek, GitHub Actions)
 
-Prezentacja: [Google Slides MFG](https://docs.google.com/presentation/d/12h0_knRQVTU9sRg9kqh8dxjSiuuKx0TA/edit)
+Prezentacja: [Google Slides MFG](https://docs.google.com/presentation/d/1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl/edit)
 
 Runner GitHub **nie ma** lokalnego pliku PPTX. Udostępnij Slides e-mailowi konta usługi (**Przeglądający**), albo ustaw `MFG_EMAIL_ATTACHMENT_PATH` lokalnie.
 

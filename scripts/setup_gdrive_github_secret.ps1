@@ -18,7 +18,7 @@ param(
     [switch]$OpenBrowser,
     [string]$Repo = "Bigmax1993/Wyszukiwarka-partnerow",
     [string]$DriveFolderId = "1tP8oUi72t4EHDbE9GnHFdvfNtNsJe4xf",
-    [string]$SlidesId = "12h0_knRQVTU9sRg9kqh8dxjSiuuKx0TA"
+    [string]$SlidesId = "1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl"
 )
 
 $ErrorActionPreference = "Stop"

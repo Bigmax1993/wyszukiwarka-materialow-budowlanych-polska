@@ -3,7 +3,7 @@
 Stały załącznik PPTX do maili MFG (DE Ost + GU bundesweit).
 
 Źródło (Google Slides):
-  https://docs.google.com/presentation/d/12h0_knRQVTU9sRg9kqh8dxjSiuuKx0TA/edit
+  https://docs.google.com/presentation/d/1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl/edit
 
 Kolejność szukania pliku:
   1. MFG_EMAIL_ATTACHMENT_PATH (env)
@@ -18,7 +18,7 @@ import logging
 import os
 from pathlib import Path
 
-GOOGLE_SLIDES_PRESENTATION_ID = "12h0_knRQVTU9sRg9kqh8dxjSiuuKx0TA"
+GOOGLE_SLIDES_PRESENTATION_ID = "1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl"
 GOOGLE_SLIDES_URL = (
     "https://docs.google.com/presentation/d/"
     f"{GOOGLE_SLIDES_PRESENTATION_ID}/edit"

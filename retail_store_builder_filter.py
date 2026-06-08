@@ -22,11 +22,16 @@ REQUIRED_RETAIL_CHAIN_KEYWORDS = (
     "lidl",
     "netto",
     "penny",
+    "kaufland",
+    "tegut",
+    "norma",
+    "rossmann",
+    "dm",
 )
 
 
 def detect_required_retail_chains(text: str) -> list[str]:
-    """Wymagane sieci: Aldi, Rewe, Edeka, Lidl, Netto, Penny."""
+    """Wymagane sieci: Aldi, Rewe, Edeka, Lidl, Netto, Penny, Kaufland, …"""
     low = (text or "").lower()
     return [c for c in REQUIRED_RETAIL_CHAIN_KEYWORDS if c in low]
 
@@ -454,24 +459,106 @@ def portfolio_negates_market_projects(text: str) -> bool:
     return _portfolio_negates_market_projects(low)
 
 
-def _portfolio_negates_market_projects(low: str) -> bool:
-    """Jawna deklaracja braku projektów marketów — nie mylić z brakiem galerii www."""
-    return any(
-        x in low
-        for x in (
-            "keine supermarkt",
-            "kein supermarkt",
-            "ohne supermarkt",
-            "nicht supermarkt",
-            "keine filial",
-            "kein filial",
-            "ohne filial",
-            "keine marktprojekte",
-            "keine supermarktprojekte",
-            "ohne einzelhandel",
-            "keine einzelhandel",
-        )
+_PORTFOLIO_NEGATION_PHRASES = (
+    "keine supermarkt",
+    "kein supermarkt",
+    "ohne supermarkt",
+    "nicht supermarkt",
+    "keine filial",
+    "kein filial",
+    "ohne filial",
+    "keine marktprojekte",
+    "keine supermarktprojekte",
+    "ohne einzelhandel",
+    "keine einzelhandel",
+)
+
+# Faza 5.1: Filialbau + referenz/projekt na stronie — bez sekcji Portfolio
+_LOOSE_WWW_REFERENCE_MARKERS = (
+    "referenz",
+    "referenzen",
+    "projekt",
+    "projekte",
+)
+
+
+def _blob_without_portfolio_negation_windows(low: str) -> str:
+    """Ukryj fragmenty z frazą negacji — „keine Supermarktprojekte” nie liczy się jako projekt."""
+    if not low:
+        return low
+    chars = list(low)
+    for phrase in _PORTFOLIO_NEGATION_PHRASES:
+        start = 0
+        while True:
+            pos = low.find(phrase, start)
+            if pos < 0:
+                break
+            end = min(len(low), pos + len(phrase) + 40)
+            for i in range(pos, end):
+                chars[i] = " "
+            start = pos + 1
+    return "".join(chars)
+
+
+def _has_loose_filialbau_reference_raw(low: str) -> bool:
+    """
+    Filialbau + referenz/projekt + konkretny sygnał marketu.
+    Samo słowo Filialbau w opisie firmy przy referencjach Bürobau nie wystarcza.
+    """
+    if not any(m in low for m in FILIALBAU_SPECIALIST_MARKERS):
+        return False
+    if not any(m in low for m in _LOOSE_WWW_REFERENCE_MARKERS):
+        return False
+    if not _has_retail_store_context(low):
+        return False
+    return (
+        any(m in low for m in MARKET_PROJECT_IN_PORTFOLIO_MARKERS)
+        or any(chain in low for chain in RETAIL_CHAIN_IN_PORTFOLIO_MARKERS)
+        or any(m in low for m in RETAIL_PROJECT_BUILD_ACTIVITY_MARKERS)
     )
+
+
+def _has_market_project_positive_signals(low: str) -> bool:
+    """Pozytywne sygnały marketów — przy mieszanym portfolio (biura + market) nie odrzucaj."""
+    clean = _blob_without_portfolio_negation_windows(low)
+    if any(m in clean for m in MARKET_PROJECT_IN_PORTFOLIO_MARKERS):
+        return True
+    if any(chain in clean for chain in RETAIL_CHAIN_IN_PORTFOLIO_MARKERS):
+        return True
+    if _has_retail_store_context(clean) and any(
+        m in clean for m in RETAIL_PROJECT_BUILD_ACTIVITY_MARKERS
+    ):
+        return True
+    if _has_loose_filialbau_reference_raw(clean):
+        return True
+    if any(ext in clean for ext in RETAIL_IMAGE_FILE_EXTENSIONS) and (
+        _has_retail_store_context(clean)
+        or any(chain in clean for chain in RETAIL_CHAIN_IN_PORTFOLIO_MARKERS)
+    ):
+        return True
+    if any(m in clean for m in MARKET_PHOTO_GALLERY_MARKERS) and (
+        _has_retail_store_context(clean)
+        or any(m in clean for m in FILIALBAU_SPECIALIST_MARKERS)
+    ):
+        return True
+    return False
+
+
+def _portfolio_negates_market_projects(low: str) -> bool:
+    """
+    Jawna deklaracja braku projektów marketów.
+    Faza 5.2: odrzucaj tylko gdy zero sygnałów marketowych (mieszane portfolio OK).
+    """
+    if not any(x in low for x in _PORTFOLIO_NEGATION_PHRASES):
+        return False
+    return not _has_market_project_positive_signals(low)
+
+
+def _has_loose_filialbau_reference_evidence(low: str) -> bool:
+    """Faza 5.1: Filialbau + referenz/projekt — bez nagłówka Portfolio."""
+    if _portfolio_negates_market_projects(low):
+        return False
+    return _has_loose_filialbau_reference_raw(low)
 
 
 def _has_retail_project_image_paths(low: str) -> bool:
@@ -525,9 +612,12 @@ def _has_market_photo_gallery_context(low: str) -> bool:
         return True
     if not any(m in low for m in MARKET_PHOTO_GALLERY_MARKERS):
         return False
-    return _has_retail_store_context(low) or any(
+    if _has_retail_store_context(low) or any(
         chain in low for chain in RETAIL_CHAIN_IN_PORTFOLIO_MARKERS
-    )
+    ):
+        return True
+    # Faza 5.1: galeria + Filialbau bez słowa „Portfolio”
+    return any(m in low for m in FILIALBAU_SPECIALIST_MARKERS)
 
 
 def _has_market_projects_evidence(low: str) -> bool:
@@ -536,27 +626,23 @@ def _has_market_projects_evidence(low: str) -> bool:
     (np. Fotogalerie Rewe, Bild Supermarkt Neubau) — bez wymogu sekcji Portfolio.
     """
     if _portfolio_negates_market_projects(low):
-        if not any(
-            chain in low
-            for chain in RETAIL_CHAIN_IN_PORTFOLIO_MARKERS
-            if len(chain) >= 4
-        ):
-            return False
-    if any(m in low for m in MARKET_PROJECT_IN_PORTFOLIO_MARKERS):
+        return False
+    evidence_blob = _blob_without_portfolio_negation_windows(low)
+    if any(m in evidence_blob for m in MARKET_PROJECT_IN_PORTFOLIO_MARKERS):
         return True
     for chain in sorted(RETAIL_CHAIN_IN_PORTFOLIO_MARKERS, key=len, reverse=True):
-        if chain in low and (
-            _has_portfolio_section(low)
-            or "referenzen" in low
-            or "referenzprojekt" in low
+        if chain in evidence_blob and (
+            _has_portfolio_section(evidence_blob)
+            or "referenzen" in evidence_blob
+            or "referenzprojekt" in evidence_blob
             or _has_market_photo_gallery_context(low)
             or is_gu_or_retail_build_specialist(low)
         ):
             return True
     if _has_market_photo_gallery_context(low):
         return True
-    if _has_retail_store_context(low) and any(
-        m in low
+    if _has_retail_store_context(evidence_blob) and any(
+        m in evidence_blob
         for m in (
             "referenzprojekt",
             "referenzprojekte",
@@ -568,19 +654,21 @@ def _has_market_projects_evidence(low: str) -> bool:
         )
     ):
         return True
-    if _has_portfolio_section(low) and _has_retail_store_context(low):
-        if ("portfolio" in low or "unsere projekte" in low or "bauprojekte" in low) and (
-            "supermarkt" in low
-            or "filial" in low
-            or "discounter" in low
-            or "einzelhandel" in low
-            or "lebensmittelmarkt" in low
-            or "verbrauchermarkt" in low
+    if _has_portfolio_section(evidence_blob) and _has_retail_store_context(evidence_blob):
+        if ("portfolio" in evidence_blob or "unsere projekte" in evidence_blob or "bauprojekte" in evidence_blob) and (
+            "supermarkt" in evidence_blob
+            or "filial" in evidence_blob
+            or "discounter" in evidence_blob
+            or "einzelhandel" in evidence_blob
+            or "lebensmittelmarkt" in evidence_blob
+            or "verbrauchermarkt" in evidence_blob
         ):
             return not _portfolio_negates_market_projects(low)
     if _has_retail_project_description_evidence(low):
         return True
     if _has_retail_project_image_paths(low):
+        return True
+    if _has_loose_filialbau_reference_evidence(evidence_blob):
         return True
     return False
 
@@ -596,6 +684,29 @@ def has_retail_references_or_portfolio(text: str) -> bool:
 
 
 has_market_store_projects_portfolio = has_market_project_evidence_on_website
+
+
+def is_gu_or_retail_build_specialist_for_serper_discovery(text: str) -> bool:
+    """
+    Serper discovery (luźny): GU lub specjalista Filialbau/Ladenbau.
+    Bez twardego REQUIRE_GENERALUNTERNEHMER — weryfikacja www zostaje restrykcyjna.
+    """
+    low = (text or "").lower()
+    if is_excluded_non_gu_role(low):
+        return False
+    gu_ok, _ = is_generalunternehmer(low)
+    if gu_ok:
+        return True
+    if " gu " in f" {low} " or low.endswith(" gu"):
+        return True
+    if any(m in low for m in FILIALBAU_SPECIALIST_MARKERS):
+        return True
+    if any(m in low for m in ("bauunternehmen", "bauunternehmung")) and (
+        _has_retail_store_context(low)
+        or any(m in low for m in FILIALBAU_SPECIALIST_MARKERS)
+    ):
+        return True
+    return False
 
 
 def mentions_retail_store_build_activity_core(text: str) -> bool:
@@ -617,6 +728,35 @@ def mentions_retail_store_build_activity_core(text: str) -> bool:
         if _has_retail_store_context(low):
             has_umbau = True
     if has_neubau or has_umbau:
+        return True
+    return any(m in low for m in GU_BUILDER_MARKERS) and (
+        "neubau" in low or "realis" in low or "erricht" in low
+    )
+
+
+def mentions_retail_store_build_activity_serper_discovery(text: str) -> bool:
+    """
+    Serper discovery: Filialbau/market w snippetcie wystarczy — bez wymogu Neubau/Umbau.
+    www i Excel nadal używają mentions_retail_store_build_activity_core (restrykcyjne).
+    """
+    low = (text or "").lower()
+    if any(m in low for m in PURE_RENOVATION_WITHOUT_STORE_BUILD):
+        if not _has_retail_store_context(low):
+            return False
+    if "bausanierung" in low and not _has_retail_store_context(low):
+        if not any(m in low for m in FILIALBAU_SPECIALIST_MARKERS):
+            return False
+    if not is_gu_or_retail_build_specialist_for_serper_discovery(low):
+        return False
+    if not _has_retail_store_context(low):
+        return False
+    if any(m in low for m in RETAIL_STORE_BUILD_MARKERS):
+        return True
+    if any(m in low for m in RETAIL_STORE_UMBAU_MARKERS):
+        return True
+    if "umbau" in low or "modernisierung" in low or "revitalisierung" in low:
+        return True
+    if any(m in low for m in FILIALBAU_SPECIALIST_MARKERS):
         return True
     return any(m in low for m in GU_BUILDER_MARKERS) and (
         "neubau" in low or "realis" in low or "erricht" in low
@@ -649,6 +789,38 @@ _SERPER_ONLY_TRADE_MARKERS = (
     "handelsimmobilie",
 )
 
+# Fraza Serper z tym kontekstem zastępuje wymóg nazwy sieci (Aldi/Rewe/…) w snippetcie.
+_SERPER_ONLY_SEARCH_TERM_TRADE_MARKERS = (
+    "filialbau",
+    "filialumbau",
+    "supermarktbau",
+    "einzelhandel",
+    "einzelhandelsbau",
+    "marktbau",
+    "handelsbau",
+    "ladenbau",
+    "marktumbau",
+    "discounterbau",
+    "handelsimmobilie",
+)
+
+
+def _serper_only_chain_or_trade_context(low: str, search_term: str) -> bool:
+    """Sieć w tekście/frazie LUB fraza Serper z kontekstem Filialbau/market."""
+    chain_context = f"{low} {(search_term or '').lower()}".strip()
+    if has_required_retail_chain_mention(chain_context):
+        return True
+    term_low = (search_term or "").lower()
+    return any(m in term_low for m in _SERPER_ONLY_SEARCH_TERM_TRADE_MARKERS)
+
+
+def _has_serper_only_trade_signal(low: str, search_term: str = "") -> bool:
+    """Słowa branżowe EH w tytule/snippetcie lub w frazie wyszukiwania."""
+    blob = f"{low} {(search_term or '').lower()}".strip()
+    if any(m in blob for m in _SERPER_ONLY_TRADE_MARKERS):
+        return True
+    return any(m in blob for m in _SERPER_ONLY_SEARCH_TERM_TRADE_MARKERS)
+
 
 def is_serper_only_pending_candidate(
     *,
@@ -674,8 +846,7 @@ def is_serper_only_pending_candidate(
     if not is_valid_commercial_company_contact(email=email, url=url, name=name):
         return False
     low = combined.lower()
-    chain_context = f"{low} {(search_term or '').lower()}".strip()
-    if not has_required_retail_chain_mention(chain_context):
+    if not _serper_only_chain_or_trade_context(low, search_term):
         return False
     if is_excluded_non_gu_role(low):
         return False
@@ -685,8 +856,7 @@ def is_serper_only_pending_candidate(
     # GU w nazwie (np. „BAUTAL GU GmbH”) — bez wymogu słów branżowych w snippetcie
     if " gu " in f" {low} " or low.endswith(" gu"):
         return True
-    has_trade = any(m in low for m in _SERPER_ONLY_TRADE_MARKERS)
-    return gu_ok and has_trade
+    return _has_serper_only_trade_signal(low, search_term)
 
 
 def is_loose_serper_discovery_candidate(
@@ -695,10 +865,12 @@ def is_loose_serper_discovery_candidate(
     url: str = "",
     name: str = "",
     text: str = "",
+    search_term: str = "",
 ) -> bool:
     """
     Lżejszy filtr na etapie Serper (tytuł/snippet).
-    Wymaga GU/Filialbau + kontekst EH; bez wymogu portfolio (to sprawdza www).
+    Faza 2: Filialbau bez Neubau, GU lub specjalista EH, fraza Serper jak w serper-only.
+    Bez wymogu portfolio (to sprawdza www).
     """
     combined = _blob(name, url, email, text)
     if is_non_commercial_contact(email=email, url=url, name=name):
@@ -709,9 +881,11 @@ def is_loose_serper_discovery_candidate(
         return False
     if not is_valid_commercial_company_contact(email=email, url=url, name=name):
         return False
-    if not has_required_retail_chain_mention(combined):
+    low = combined.lower()
+    if not _serper_only_chain_or_trade_context(low, search_term):
         return False
-    return mentions_retail_store_build_activity_core(combined)
+    activity_blob = f"{combined} {(search_term or '')}".strip()
+    return mentions_retail_store_build_activity_serper_discovery(activity_blob)
 
 
 def is_valid_retail_store_builder_contact(

@@ -21,6 +21,7 @@
     "Saarland"
   ],
   "min_contacts_target": 100,
+  "geo_filter_enabled": false,
   "require_generalunternehmer": true,
   "require_market_projects_in_portfolio": true,
   "require_website_references_or_portfolio": true,

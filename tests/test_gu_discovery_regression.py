@@ -38,6 +38,23 @@ class BundesweitRegression(unittest.TestCase):
         self.assertEqual(len(ALL_BUNDESLAENDER), 16)
         self.assertEqual(len(scraper.CAMPAIGN_ACTIVE_BUNDESLAENDER), 16)
 
+    def test_bundesweit_region_suffix_short(self):
+        """Faza 3: suffix Serper bez NRW/BY/… przy ≥4 landach."""
+        from de_gu_keywords import build_region_suffix
+
+        self.assertEqual(build_region_suffix(list(ALL_BUNDESLAENDER)), "Deutschland")
+        self.assertEqual(
+            build_region_suffix(["Nordrhein-Westfalen", "Bayern", "Hessen", "Sachsen"]),
+            "Deutschland",
+        )
+
+    def test_two_lands_keep_short_suffix(self):
+        from de_gu_keywords import build_region_suffix
+
+        suffix = build_region_suffix(["Nordrhein-Westfalen", "Bayern"])
+        self.assertIn("Deutschland", suffix)
+        self.assertIn("NRW", suffix)
+
     def test_bundesweit_has_many_discovery_terms(self):
         self.assertGreaterEqual(len(scraper.SERPER_DISCOVERY_TERMS), 500)
         self.assertGreaterEqual(
@@ -190,6 +207,112 @@ class StrictGuFilterRegression(unittest.TestCase):
         self.assertFalse(ok)
 
 
+class GeoFilterRegression(unittest.TestCase):
+    def test_geo_filters_disabled_by_default(self):
+        self.assertFalse(scraper.ENABLE_REGION_PLZ_FILTER)
+        self.assertFalse(scraper.ENABLE_DISTANCE_FROM_REGION_KM)
+        self.assertFalse(scraper._geo_filters_enabled())
+        self.assertTrue(scraper.location_within_region_km("München Hamburg Köln"))
+
+    def test_is_germany_accepts_de_domain(self):
+        self.assertTrue(
+            scraper.is_germany_de_candidate("https://firma-bau.de/kontakt", "GU Leipzig", "")
+        )
+
+    def test_is_germany_accepts_plz_on_com_domain(self):
+        self.assertTrue(
+            scraper.is_germany_de_candidate(
+                "https://bau-gmbh.com",
+                "Bau GmbH",
+                "50321 Brühl Deutschland",
+            )
+        )
+
+    def test_is_germany_rejects_at_domain(self):
+        self.assertFalse(
+            scraper.is_germany_de_candidate("https://firma-bau.at/kontakt", "Bau Wien", "")
+        )
+
+    def test_is_germany_ignores_schweiz_in_snippet_for_de_site(self):
+        """Faza 3: słowo Schweiz w opisie nie odrzuca .de."""
+        self.assertTrue(
+            scraper.is_germany_de_candidate(
+                "https://gu-leipzig.de",
+                "GU Leipzig",
+                "Projekte Deutschland und Schweiz Grenzregion",
+            )
+        )
+
+    def test_run_config_disables_geo_filters(self):
+        import de_gu_bauunternehmen_scraper as mod
+
+        apply = scraper.apply_gu_run_config_extras
+        apply(mod, {"geo_filter_enabled": False})
+        self.assertFalse(mod.ENABLE_REGION_PLZ_FILTER)
+        self.assertFalse(mod.ENABLE_DISTANCE_FROM_REGION_KM)
+
+
+class LooseSerperFilterRegression(unittest.TestCase):
+    def test_accepts_filialbau_without_neubau(self):
+        """Faza 2: Filialbau w snippetcie bez Neubau/Umbau."""
+        self.assertTrue(
+            is_loose_serper_discovery_candidate(
+                name="Müller Filialbau GmbH",
+                url="https://mueller-filialbau.de",
+                text="Generalunternehmer Filialbau und Supermarktbau Referenz Rewe",
+            )
+        )
+
+    def test_accepts_filialbau_specialist_without_gu_word(self):
+        """Faza 2: specjalista EH bez słowa generalunternehmer."""
+        self.assertTrue(
+            is_loose_serper_discovery_candidate(
+                name="Partner Einzelhandelsbau GmbH",
+                url="https://partner-eh.de",
+                text="Einzelhandelsbau und Marktbau für Rewe und Edeka in Bayern",
+            )
+        )
+
+    def test_accepts_chain_from_search_term_filialbau(self):
+        self.assertTrue(
+            is_loose_serper_discovery_candidate(
+                name="Nord Bau GmbH",
+                url="https://nord-bau.de",
+                text="Gewerbebau Stuttgart Referenzprojekte",
+                search_term="Generalunternehmer Supermarktbau Stuttgart",
+            )
+        )
+
+    def test_rejects_without_chain_or_trade_context(self):
+        self.assertFalse(
+            is_loose_serper_discovery_candidate(
+                name="Weber GU GmbH",
+                url="https://weber-gu.de",
+                text="Generalunternehmer Filialbau Gewerbebau",
+            )
+        )
+
+    def test_rejects_media_publisher(self):
+        self.assertFalse(
+            is_loose_serper_discovery_candidate(
+                url="https://www.hi-heute.de/supermarkte",
+                name="hi-heute.de",
+                text="Supermarkt Nachrichten Aldi Rewe",
+            )
+        )
+
+    def test_loose_accepts_more_than_strict_core(self):
+        """Luźny Serper: Filialbau bez słowa GU; strict core wymaga generalunternehmer."""
+        from retail_store_builder_filter import (
+            mentions_retail_store_build_activity_core,
+            mentions_retail_store_build_activity_serper_discovery,
+        )
+
+        text = "Partner Einzelhandelsbau GmbH Marktbau Referenz Rewe Bayern"
+        self.assertTrue(mentions_retail_store_build_activity_serper_discovery(text))
+        self.assertFalse(mentions_retail_store_build_activity_core(text))
+
+
 class SerperOnlyFilterRegression(unittest.TestCase):
     def test_rejects_ladenbau_without_gu_in_snippet(self):
         self.assertFalse(
@@ -264,6 +387,37 @@ class SerperOnlyFilterRegression(unittest.TestCase):
                 url="https://mueller-gu-koeln.de",
                 text="Generalunternehmer Filialbau Köln Referenzprojekte",
                 search_term="Generalunternehmer Köln Filialumbau Lidl",
+            )
+        )
+
+    def test_serper_only_accepts_filialbau_in_search_term_without_chain(self):
+        """Faza 1: fraza z Filialbau wystarczy — snippet bez marki sieci."""
+        self.assertTrue(
+            is_serper_only_pending_candidate(
+                name="Stuttgart Bau GmbH",
+                url="https://stuttgart-bau.de",
+                text="Gewerbebau und Hallenbau Referenzprojekte",
+                search_term="Generalunternehmer Filialbau Stuttgart",
+            )
+        )
+
+    def test_serper_only_accepts_trade_signal_without_gu_marker(self):
+        """Faza 1: markery branżowe w snippetcie bez słowa generalunternehmer."""
+        self.assertTrue(
+            is_serper_only_pending_candidate(
+                name="Partner Marktbau GmbH",
+                url="https://partner-marktbau.de",
+                text="Einzelhandelsbau und Supermarktprojekte in Bayern",
+                search_term="Generalunternehmer Marktbau München",
+            )
+        )
+
+    def test_serper_only_accepts_extended_chain_kaufland(self):
+        self.assertTrue(
+            is_serper_only_pending_candidate(
+                name="Nord Bau GmbH",
+                url="https://nord-bau.de",
+                text="Generalunternehmer Filialbau Referenz Kaufland Neubau",
             )
         )
 
@@ -484,6 +638,104 @@ class SmallCompanyFilterRegression(unittest.TestCase):
         )
         self.assertTrue(large)
         self.assertIn("grosses_unternehmen", reason)
+
+    def test_whitelist_regional_gu_with_moderate_employee_count(self):
+        """Faza 4: 280 Mitarbeiter + regionalny GU — nie odrzucaj jako koncern."""
+        page = (
+            "Generalunternehmer Filialbau regional tätig in Bayern. "
+            "280 Mitarbeiter. Referenzprojekte Rewe Aldi."
+        )
+        large, reason = scraper.is_likely_large_company(
+            "Weber GU GmbH",
+            "https://weber-gu-bayern.de",
+            page,
+            serper_blob="weltweit tätig konzern international tätig",
+        )
+        self.assertFalse(large, reason)
+
+    def test_whitelist_does_not_apply_above_employee_threshold(self):
+        large, _ = scraper.is_likely_large_company(
+            "Regional GU GmbH",
+            "https://regional-gu.de",
+            "Generalunternehmer Filialbau regional. 650 Mitarbeiter.",
+        )
+        self.assertFalse(large)  # bez markerów koncernu — tylko liczba > 499
+
+    def test_whitelist_blocked_by_strong_konzern_signal(self):
+        """Silny sygnał koncernu (börsennotiert) blokuje whitelist mimo regionalnego GU."""
+        large, reason = scraper.is_likely_large_company(
+            "Bau GmbH",
+            "https://bau-gmbh.de",
+            "Generalunternehmer Filialbau regional. 200 Mitarbeiter. Börsennotiert Konzern.",
+        )
+        self.assertTrue(large)
+        self.assertIn("grosses_unternehmen", reason)
+
+    def test_whitelist_does_not_override_known_konzern_domain(self):
+        large, _ = scraper.is_likely_large_company(
+            "Regional Bau",
+            "https://www.hochtief.de",
+            "Generalunternehmer Filialbau regional 150 Mitarbeiter",
+        )
+        self.assertTrue(large)
+
+    def test_max_employee_count_parser(self):
+        self.assertEqual(
+            scraper._max_employee_count_in_blob("ca. 280 mitarbeiter in deutschland"),
+            280,
+        )
+        self.assertEqual(
+            scraper._max_employee_count_in_blob("Belegschaft von 120 Mitarbeiterinnen"),
+            120,
+        )
+
+
+class CompanyNameLegalFormRegression(unittest.TestCase):
+    """Faza 6: e.K. / GbR jako prawidłowa forma prawna w nazwie do Excela."""
+
+    def test_accepts_ek_legal_form(self):
+        for name in (
+            "Müller Filialbau e.K.",
+            "Müller Filialbau e. K.",
+            "Bau Meier eK",
+            "Hans Bau E.K",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(scraper._company_name_has_legal_form(name))
+
+    def test_accepts_gbr_legal_form(self):
+        for name in ("Weber Bau GbR", "Schmidt & Partner GbR", "Partner GbR."):
+            with self.subTest(name=name):
+                self.assertTrue(scraper._company_name_has_legal_form(name))
+
+    def test_rejects_ekfm_as_legal_form(self):
+        self.assertFalse(scraper._company_name_has_legal_form("Schmidt e.Kfm."))
+        self.assertFalse(scraper._company_name_has_legal_form("e.Kfm. Schmidt Bau"))
+
+    def test_ek_gbr_not_rejected_for_export(self):
+        self.assertFalse(
+            scraper.is_rejected_company_name_for_export(
+                "Müller Filialbau e.K.",
+                "https://mueller-filialbau.de",
+                "info@mueller-filialbau.de",
+            )
+        )
+        self.assertFalse(
+            scraper.is_rejected_company_name_for_export(
+                "Schmidt & Partner GbR",
+                "https://schmidt-bau.de",
+                "kontakt@schmidt-bau.de",
+            )
+        )
+
+    def test_finalize_prefers_ek_name(self):
+        name = scraper.finalize_company_name_for_export(
+            "Müller Filialbau e.K.",
+            fallback_raw="Müller Filialbau",
+            website="https://mueller-filialbau.de",
+            email="info@mueller-filialbau.de",
+        )
+        self.assertEqual(name, "Müller Filialbau e.K.")
 
 
 class SmallLadenbauVerifyRegression(unittest.TestCase):

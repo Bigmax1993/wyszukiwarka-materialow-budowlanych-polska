@@ -416,7 +416,10 @@ def build_fallback_terms(active: list[str] | None = None) -> list[str]:
 def build_region_suffix(active: list[str] | None = None) -> str:
     """Krótki suffix — długie query Serper prawie zawsze zwraca 0 wyników."""
     lands = resolve_active_bundeslaender(active)
-    if len(lands) == 1:
+    if len(lands) <= 1:
+        return "Deutschland"
+    # Faza 3: bundesweit (≥4 landy) — tylko „Deutschland”, bez skrótów NRW/BY/…
+    if len(lands) >= 4:
         return "Deutschland"
     shorts = " ".join(BUNDESLAND_CONFIG[l]["short"] for l in lands[:4])
     return f"Deutschland {shorts}"

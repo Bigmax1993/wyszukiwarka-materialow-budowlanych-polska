@@ -86,6 +86,10 @@ def apply_gu_run_config_extras(module, data: dict) -> None:
             module.MIN_CONTACTS_TARGET = int(data["min_contacts_target"])
         except (TypeError, ValueError):
             pass
+    if "geo_filter_enabled" in data and not bool(data["geo_filter_enabled"]):
+        module.ENABLE_REGION_PLZ_FILTER = False
+        module.ENABLE_DISTANCE_FROM_REGION_KM = False
+        module.ENABLE_PLZ_PREFIX_REGION_MATCH = False
     _bool_keys = (
         "enable_gemini_discovery_terms",
         "enable_gemini_page_verify",
@@ -369,23 +373,18 @@ SERPER_BAD_DOMAINS = [
     "lidl.de",
     "netto-online",
 ]
-NON_DE_FOREIGN_HINTS = [
-    "polska",
-    "poland",
-    ".pl/",
-    "österreich",
-    "austria",
-    "schweiz",
-    "switzerland",
-    "france",
-    "italy",
-    "netherlands",
-    "nederland",
-    "czech",
-    "česko",
-    "cesko",
-    ".cz/",
-]
+# Silne obce TLD — odrzucenie tylko domeny, nie słów w snippetcie Google
+_FOREIGN_TLD_SUFFIXES = (
+    ".at",
+    ".ch",
+    ".pl",
+    ".cz",
+    ".fr",
+    ".it",
+    ".nl",
+    ".be",
+    ".lu",
+)
 # Geo / Serper – de_gu_keywords.py
 DE_COUNTRY_HINTS = [
     "deutschland",
@@ -529,6 +528,48 @@ _STRONG_LARGE_PAGE_MARKERS = (
     "mitarbeiter weltweit",
     "über 1.000 mitarbeiter",
     "über 1000 mitarbeiter",
+)
+# Faza 4: regionalny GU z podaną liczbą pracowników poniżej progu — nie traktuj jak koncern
+REGIONAL_GU_EMPLOYEE_WHITELIST_MAX = 499
+_REGIONAL_GU_CONTEXT_MARKERS = (
+    "generalunternehmer",
+    "filialbau",
+    "ladenbau",
+    "supermarktbau",
+    "einzelhandelsbau",
+    "marktbau",
+    "handelsbau",
+    " gu ",
+)
+_REGIONAL_GU_REGIONAL_MARKERS = (
+    "regional",
+    "familienunternehmen",
+    "familienbetrieb",
+    "inhabergeführt",
+    "inhabergefuehrt",
+    "meisterbetrieb",
+    "mittelständ",
+    "mittelstaend",
+    "vor ort",
+    "kleinunternehmen",
+)
+_STRONG_KONZERN_OVERRIDE_MARKERS = (
+    "konzern",
+    "börsennotiert",
+    "weltweit tätig",
+    "global player",
+    "tochtergesellschaft der",
+    "mitarbeiter weltweit",
+    "europäischer marktführer",
+    "weltmarktführer",
+)
+_EMPLOYEE_COUNT_PATTERNS = (
+    re.compile(
+        r"(?:über|ueber|mehr als|ca\.?|rund|etwa)\s*(\d{1,4})\s+mitarbeiter",
+        re.I,
+    ),
+    re.compile(r"(\d{1,4})\s+mitarbeiter(?:innen)?\b", re.I),
+    re.compile(r"belegschaft\s*(?:von|:)?\s*(\d{1,4})\b", re.I),
 )
 SMALL_COMPANY_PAGE_MARKERS = (
     "familienunternehmen",
@@ -1083,8 +1124,13 @@ def touch_gemini_call(cache: dict | None) -> None:
         cache["gemini_last_call_at"] = time.time()
 
 
+# Faza 6: e.K. / GbR — małe GU bez GmbH (bez fałszywego trafienia e.Kfm.)
 _COMPANY_LEGAL_FORM_PATTERN = (
-    r"(?:GmbH|UG(?:\s*\(haftungsbeschränkt\))?|AG|GbR|e\.?\s*K\.?|KG|OHG|PartG|Co\.\s*KG|mbH|SE|SE\s*&\s*Co\.\s*KG)"
+    r"(?:GmbH|UG(?:\s*\(haftungsbeschränkt\))?|AG|"
+    r"GbR\.?|"
+    r"e\.?\s*K\.(?=\s|$)|"
+    r"e\.?\s*K(?=\s|$)|"
+    r"KG|OHG|PartG|Co\.\s*KG|mbH|SE|SE\s*&\s*Co\.\s*KG)"
 )
 
 # Harte Ablehnung für Excel/Gemini — kein Firmenname (PDF, Portale, Städte, SEO, Software …)
@@ -2704,6 +2750,45 @@ def _domain_from_url(url: str) -> str:
         return ""
 
 
+def _max_employee_count_in_blob(blob: str) -> int | None:
+    counts: list[int] = []
+    for pat in _EMPLOYEE_COUNT_PATTERNS:
+        for m in pat.finditer(blob):
+            try:
+                n = int(m.group(1))
+            except (TypeError, ValueError):
+                continue
+            if 10 <= n <= 9999:
+                counts.append(n)
+    return max(counts) if counts else None
+
+
+def _has_regional_gu_context(
+    blob: str, company_name: str = "", website: str = ""
+) -> bool:
+    combined = f"{blob} {company_name or ''} {website or ''}".lower()
+    has_gu = any(m in combined for m in _REGIONAL_GU_CONTEXT_MARKERS)
+    has_regional = any(m in combined for m in _REGIONAL_GU_REGIONAL_MARKERS)
+    return has_gu and has_regional
+
+
+def _is_whitelisted_regional_gu_with_employees(
+    blob: str, company_name: str = "", website: str = ""
+) -> bool:
+    """
+    Faza 4: mały regionalny GU z liczbą pracowników w opisie (< 500) — nie odrzucaj.
+    Nie dotyczy domen/nazw koncernów ani silnych sygnałów holdingu.
+    """
+    if any(m in blob for m in _STRONG_KONZERN_OVERRIDE_MARKERS):
+        return False
+    if not _has_regional_gu_context(blob, company_name, website):
+        return False
+    emp = _max_employee_count_in_blob(blob)
+    if emp is None:
+        return False
+    return emp <= REGIONAL_GU_EMPLOYEE_WHITELIST_MAX
+
+
 def is_likely_large_company(
     company_name: str = "",
     website: str = "",
@@ -2744,6 +2829,11 @@ def is_likely_large_company(
         return True, f"grosses_unternehmen_name:{marker}"
     large_page_hits = sum(1 for m in LARGE_COMPANY_PAGE_MARKERS if m in blob)
     strong_hits = sum(1 for m in _STRONG_LARGE_PAGE_MARKERS if m in blob)
+    would_be_large = (large_page_hits >= 2 and strong_hits >= 1) or strong_hits >= 2
+    if would_be_large and _is_whitelisted_regional_gu_with_employees(
+        blob, company_name, website
+    ):
+        return False, ""
     if large_page_hits >= 2 and strong_hits >= 1:
         return True, "grosses_unternehmen_seite"
     if strong_hits >= 2:
@@ -3311,18 +3401,34 @@ def score_serper_candidate(link: str, title: str = "", snippet: str = "", compan
     return score
 
 
+def _geo_filters_enabled() -> bool:
+    """Filtry PLZ/odległości — domyślnie wyłączone (kampania bundesweit)."""
+    return bool(ENABLE_REGION_PLZ_FILTER or ENABLE_DISTANCE_FROM_REGION_KM)
+
+
 def is_germany_de_candidate(link: str, title: str = "", snippet: str = "") -> bool:
+    """
+    Faza 3: przepuszczaj .de i niemiecką PLZ; odrzucaj tylko silne obce TLD w domenie.
+    Słowa typu „Schweiz” w snippetcie nie dyskwalifikują firmy z .de.
+    """
     if COUNTRY_RESTRICTION != "DE":
         return True
     dom = get_registrable_domain(link or "")
     if dom in AGGREGATOR_EMAIL_DOMAINS:
         return False
-    text = " ".join([link or "", title or "", snippet or ""]).lower()
-    if any(x in text for x in NON_DE_FOREIGN_HINTS):
+    dom_low = (dom or "").lower()
+    if dom_low.endswith(".de"):
+        return True
+    if any(dom_low.endswith(tld) for tld in _FOREIGN_TLD_SUFFIXES):
         return False
-    if ".de/" in text or text.endswith(".de"):
+    text = " ".join([link or "", title or "", snippet or ""]).lower()
+    if re.search(r"https?://[^/\s]+\.(at|ch|pl|cz|fr|it|nl|be|lu)(/|$)", text):
+        return False
+    if re.search(r"\b\d{5}\b", text):
         return True
     if any(x in text for x in DE_COUNTRY_HINTS):
+        return True
+    if ".de/" in text or text.rstrip("/").endswith(".de"):
         return True
     return True
 
@@ -3645,9 +3751,7 @@ def find_emails_in_text(
     return list(contacts.get("emails") or [])
 
 
-_COMPANY_LEGAL_SUFFIX = (
-    r"(?:GmbH|UG(?:\s*\(haftungsbeschränkt\))?|AG|GbR|e\.?\s*K\.?|KG|OHG|PartG|mbH|Co\.\s*KG)"
-)
+_COMPANY_LEGAL_SUFFIX = _COMPANY_LEGAL_FORM_PATTERN
 def _pick_best_company_name(
     candidates: list[str], website: str = "", email: str = ""
 ) -> str:
@@ -5848,7 +5952,7 @@ def run_scraper(
             total_new_rows, stop_requested = _process_serper_terms(
                 SERPER_DISCOVERY_TERMS,
                 "primary",
-                apply_distance_filter=True,
+                apply_distance_filter=_geo_filters_enabled(),
                 **serper_kw,
             )
             if not stop_requested and not _discovery_target_reached(
@@ -6166,6 +6270,15 @@ def _run_smoke_tests() -> None:
         name="NEULA GmbH", url="https://neula.de", email="info@neula.de"
     )[0]
     assert _company_name_has_legal_form("Kultbau GmbH")
+    assert _company_name_has_legal_form("Müller Filialbau e.K.")
+    assert _company_name_has_legal_form("Weber Bau GbR")
+    assert not _company_name_has_legal_form("Schmidt e.Kfm.")
+    assert not is_rejected_company_name_for_export(
+        "Müller Filialbau e.K.", "https://mueller-filialbau.de", "info@mueller-filialbau.de"
+    )
+    assert not is_rejected_company_name_for_export(
+        "Schmidt & Partner GbR", "https://schmidt-bau.de", "kontakt@schmidt-bau.de"
+    )
     assert is_non_commercial_email("info@leipzig.de")
     assert is_non_commercial_email("service@thueringen-entdecken.de")
     assert not is_non_commercial_email("office@maxwiessner.de")

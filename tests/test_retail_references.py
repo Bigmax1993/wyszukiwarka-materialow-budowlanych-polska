@@ -17,6 +17,7 @@ from retail_store_builder_filter import (
     has_market_project_evidence_on_website,
     has_retail_references_or_portfolio,
     has_required_retail_chain_mention,
+    portfolio_negates_market_projects,
 )
 
 
@@ -73,7 +74,41 @@ class RetailReferenceEvidence(unittest.TestCase):
         self.assertEqual(
             set(detect_required_retail_chains("Penny und Lidl")), {"penny", "lidl"}
         )
-        self.assertFalse(has_required_retail_chain_mention("Kaufland Markt Neubau"))
+        self.assertFalse(has_required_retail_chain_mention("Discounter Markt Neubau"))
+
+    def test_faza5_filialbau_plus_referenz_without_portfolio_section(self):
+        """Faza 5.1: Filialbau + referenz/projekt bez zakładki Portfolio."""
+        text = (
+            "Generalunternehmer Filialbau. Unsere Referenzen: "
+            "Supermarktumbau und Filialmodernisierung im Einzelhandel."
+        )
+        self.assertTrue(has_retail_references_or_portfolio(text))
+
+    def test_faza5_gallery_without_portfolio_word(self):
+        """Faza 5.1: galeria zdjęć bez słowa Portfolio."""
+        text = (
+            "Generalunternehmer Filialbau. Bildergalerie unserer Arbeiten. "
+            "Supermarkt Neubau und Filialumbau."
+        )
+        self.assertTrue(has_market_project_evidence_on_website(text))
+
+    def test_faza5_mixed_portfolio_with_negation_but_market_signal(self):
+        """Faza 5.2: biura + fraza negacji, ale jest sygnał marketu (Rewe)."""
+        text = (
+            "Generalunternehmer Filialbau. Referenzen Bürobau und Hallenbau. "
+            "Keine Supermarktprojekte mehr geplant — abgeschlossenes Rewe Filialumbau 2023."
+        )
+        self.assertFalse(portfolio_negates_market_projects(text))
+        self.assertTrue(has_retail_references_or_portfolio(text))
+
+    def test_faza5_negation_without_any_market_signal(self):
+        """Faza 5.2: jawna negacja bez żadnego sygnału marketowego."""
+        text = (
+            "Generalunternehmer Gewerbebau. Ohne Einzelhandel und ohne Filialen. "
+            "Nur Bürobau und Logistikhallen."
+        )
+        self.assertTrue(portfolio_negates_market_projects(text))
+        self.assertFalse(has_market_project_evidence_on_website(text))
 
 
 class SerperUnlimited(unittest.TestCase):

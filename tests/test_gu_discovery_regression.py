@@ -243,6 +243,27 @@ class SerperOnlyFilterRegression(unittest.TestCase):
         self.assertEqual(row.get("verification_reason"), scraper.PENDING_WWW_VERIFY_REASON)
         self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
 
+    def test_pick_email_prefers_impressum_over_homepage_junk(self):
+        target, score, method = scraper.pick_email_with_impressum_priority(
+            all_emails=[
+                "d@enschutzhinweisen.akzeptieren",
+                "privacy@firma.de",
+            ],
+            impressum_emails=["info@k-in.de"],
+            website="https://koerling-interiors.de",
+        )
+        self.assertEqual(target, "info@k-in.de")
+        self.assertIn(method, ("impressum", "impressum_rules"))
+        self.assertGreaterEqual(score, scraper.MIN_EMAIL_SCORE_FOR_SEND)
+
+    def test_collect_impressum_urls_includes_guessed_paths(self):
+        urls = scraper.collect_impressum_urls(
+            "https://www.beispiel-bau.de/leistungen/",
+            ["https://www.beispiel-bau.de/kontakt/"],
+        )
+        self.assertTrue(any("/impressum" in u for u in urls))
+        self.assertNotIn("https://www.beispiel-bau.de/kontakt/", urls)
+
     def test_website_inbox_email_on_short_domain(self):
         from email_targeting import (
             MIN_EMAIL_SCORE_FOR_SEND,

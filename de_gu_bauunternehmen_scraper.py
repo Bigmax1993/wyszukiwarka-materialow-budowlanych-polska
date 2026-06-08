@@ -262,7 +262,8 @@ ENABLE_DISTANCE_FROM_REGION_KM = False
 ENABLE_PLZ_PREFIX_REGION_MATCH = False
 REQUEST_TIMEOUT = 20
 MAX_CONTACT_LINKS = 6
-MAX_IMPRESSUM_GUESS_FETCH = 3
+# Osobny budżet na Impressum — tam często jest jedyny prawidłowy info@
+MAX_IMPRESSUM_GUESS_FETCH = 6
 HTTP_RETRY_ATTEMPTS = 3
 HTTP_BACKOFF_SECONDS = 1.5
 GEMINI_MODEL = get_env_value(ENV_GEMINI_MODEL, "gemini-2.0-flash")
@@ -1966,6 +1967,7 @@ def pipeline_row_to_contact_info(row: dict) -> dict:
             ).strip(),
             "email_target": email,
             "emails_found": (row.get("emails_found") or "").strip(),
+            "impressum_emails_found": (row.get("impressum_emails_found") or "").strip(),
             "phones_found": (row.get("phones_found") or row.get("telefon") or "").strip(),
             "email_status": (row.get("email_status") or "").strip(),
             "retail_verified": bool(row.get("retail_verified")),
@@ -4432,6 +4434,24 @@ def sort_contact_urls_priority_pl(urls: list[str]) -> list[str]:
     return sorted(urls, key=key)
 
 
+def collect_impressum_urls(website: str, discovered: list[str] | None = None) -> list[str]:
+    """Wszystkie URL Impressum: zgadnięte ścieżki + linki ze strony (bez limitu kontaktów)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in guess_impressum_urls(website):
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    for u in discovered or []:
+        u = (u or "").strip()
+        if not u.startswith(("http://", "https://")):
+            continue
+        if _is_impressum_url(u) and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def merge_contact_subpage_urls(website: str, discovered: list[str]) -> list[str]:
     """Impressum (link + zgadnięte ścieżki) przed innymi podstronami."""
     seen: set[str] = set()
@@ -4452,6 +4472,14 @@ def merge_contact_subpage_urls(website: str, discovered: list[str]) -> list[str]
     rest = [u for u in merged if u not in impressum and u not in kontakt]
     ordered = sort_contact_urls_priority_pl(impressum + kontakt + rest)
     return ordered[:MAX_CONTACT_LINKS]
+
+
+def collect_non_impressum_contact_urls(
+    website: str, discovered: list[str] | None = None
+) -> list[str]:
+    """Kontakt / referenzen — bez Impressum (Impressum ma osobny przebieg)."""
+    merged = merge_contact_subpage_urls(website, list(discovered or []))
+    return [u for u in merged if not _is_impressum_url(u)][:MAX_CONTACT_LINKS]
 
 
 def extract_html_text_with_media_hints(soup: BeautifulSoup) -> str:
@@ -4665,6 +4693,9 @@ def backfill_emails_in_cache(cache: dict, logger: logging.Logger) -> dict:
         stats["checked"] += 1
         raw_found = (info.get("emails_found") or "").strip()
         candidates = filter_commercial_emails(_parse_emails_found_field(raw_found))
+        impressum_candidates = filter_commercial_emails(
+            _parse_emails_found_field(info.get("impressum_emails_found") or "")
+        )
         cleaned_found = ", ".join(candidates)
         if cleaned_found != raw_found:
             info["emails_found"] = cleaned_found
@@ -4677,7 +4708,9 @@ def backfill_emails_in_cache(cache: dict, logger: logging.Logger) -> dict:
             or ""
         ).strip()
         old_target = (info.get("email_target") or "").strip().lower()
-        target, score = pick_best_email_for_inquiry(candidates, website)
+        target, score, pick_method = pick_email_with_impressum_priority(
+            candidates, impressum_candidates, website
+        )
         if target and is_non_commercial_email(target):
             target = ""
         if target:
@@ -4689,7 +4722,9 @@ def backfill_emails_in_cache(cache: dict, logger: logging.Logger) -> dict:
                     stats["filled"] += 1
                 info["email_target"] = target
                 info["email_target_score"] = score
-                info["email_pick_method"] = "rules_backfill"
+                info["email_pick_method"] = (
+                    pick_method if pick_method != "none" else "rules_backfill"
+                )
                 if (info.get("email_status") or "") in (
                     "",
                     "no_suitable_email",
@@ -4883,6 +4918,36 @@ def gemini_pick_inquiry_email_from_page(
     return ""
 
 
+def pick_email_with_impressum_priority(
+    all_emails: list[str],
+    impressum_emails: list[str],
+    website: str,
+) -> tuple[str, int, str]:
+    """
+    Najpierw Impressum (obowiązkowe źródło w DE), potem pozostałe podstrony.
+    Zwraca (email, score, metoda).
+    """
+    site = website or ""
+    impressum = filter_commercial_emails(list(impressum_emails or []))
+    if impressum:
+        ws_target, ws_score = pick_best_email_from_website_scrape(impressum, site)
+        if ws_target:
+            return ws_target, ws_score, "impressum"
+        target, score = pick_best_email_for_inquiry(impressum, site)
+        if target:
+            return target, score, "impressum_rules"
+
+    candidates = filter_commercial_emails(list(all_emails or []))
+    target, score = pick_best_email_for_inquiry(candidates, site)
+    if target:
+        return target, score, "rules"
+    if candidates:
+        ws_target, ws_score = pick_best_email_from_website_scrape(candidates, site)
+        if ws_target:
+            return ws_target, ws_score, "website_inbox"
+    return "", score if candidates else 0, "none"
+
+
 def resolve_inquiry_email_target(
     collected: dict,
     website: str,
@@ -4894,18 +4959,18 @@ def resolve_inquiry_email_target(
 ) -> tuple[str, int, str]:
     """
     Zwraca (email_target, score, metoda).
-    metoda: rules | gemini_arbitration | none
+    metoda: impressum | impressum_rules | rules | website_inbox | gemini_arbitration | none
     """
     candidates = filter_commercial_emails(list(collected.get("emails") or []))
+    impressum_candidates = filter_commercial_emails(
+        list(collected.get("impressum_emails") or [])
+    )
     site = collected.get("website") or website or ""
     snippet = collected.get("page_snippet") or ""
 
-    target, score = pick_best_email_for_inquiry(candidates, site)
-    method = "rules" if target else "none"
-    if not target and candidates:
-        ws_target, ws_score = pick_best_email_from_website_scrape(candidates, site)
-        if ws_target:
-            target, score, method = ws_target, ws_score, "website_inbox"
+    target, score, method = pick_email_with_impressum_priority(
+        candidates, impressum_candidates, site
+    )
     if target and not is_valid_retail_store_builder_contact(
         email=target, url=site, name=company_name, text=snippet
     ):
@@ -4980,27 +5045,25 @@ def collect_contacts_from_website(
     console_step(f"Kontakte sammeln (nach WWW-Prüfung): {website}")
     base = parse_contacts_from_page(website, logger, cache=cache)
     emails = list(base["emails"])
+    impressum_emails: list[str] = []
     phones = list(base["phones"])
     company_candidates: list[str] = []
     if base.get("company_name"):
         company_candidates.append(base["company_name"])
     source_urls = [website]
     text_parts = [base.get("page_text") or ""]
-    contact_links = merge_contact_subpage_urls(
-        website,
-        sort_verification_urls(base.get("contact_urls") or []),
-    )
-    # Dodatkowe próby typowych /impressum (nawet bez linku w menu)
-    impressum_guesses = guess_impressum_urls(website)[:MAX_IMPRESSUM_GUESS_FETCH]
-    fetch_queue: list[str] = []
-    seen_fetch: set[str] = set()
-    for u in contact_links + impressum_guesses:
-        if u not in seen_fetch:
-            seen_fetch.add(u)
-            fetch_queue.append(u)
-    for u in fetch_queue:
-        details = parse_contacts_from_page(u, logger, cache=cache)
+    discovered_links = sort_verification_urls(base.get("contact_urls") or [])
+    impressum_urls = collect_impressum_urls(website, discovered_links)[
+        :MAX_IMPRESSUM_GUESS_FETCH
+    ]
+    other_urls = collect_non_impressum_contact_urls(website, discovered_links)
+    seen_fetch: set[str] = {website}
+
+    def _merge_page_details(u: str, details: dict, *, from_impressum: bool) -> None:
+        nonlocal emails, impressum_emails, phones, company_candidates, text_parts, source_urls
         for e in details["emails"]:
+            if from_impressum and e not in impressum_emails:
+                impressum_emails.append(e)
             if e not in emails:
                 emails.append(e)
         for p in details["phones"]:
@@ -5012,9 +5075,30 @@ def collect_contacts_from_website(
             text_parts.append(details["page_text"])
         if u not in source_urls:
             source_urls.append(u)
+
+    for u in impressum_urls:
+        if u in seen_fetch:
+            continue
+        seen_fetch.add(u)
+        console_step(f"Impressum prüfen: {u}")
+        details = parse_contacts_from_page(u, logger, cache=cache)
+        _merge_page_details(u, details, from_impressum=True)
+
+    for u in other_urls:
+        if u in seen_fetch:
+            continue
+        seen_fetch.add(u)
+        details = parse_contacts_from_page(u, logger, cache=cache)
+        _merge_page_details(u, details, from_impressum=False)
+
+    if impressum_emails:
+        console_step(
+            f"Impressum: {len(impressum_emails)} E-Mail(s) — {', '.join(impressum_emails[:3])}"
+        )
     page_snippet = _truncate_page_snippet(" ".join(text_parts))
     return {
         "emails": emails,
+        "impressum_emails": impressum_emails,
         "phones": phones,
         "company_name": _pick_best_company_name(company_candidates, website),
         "website": website,
@@ -5476,6 +5560,7 @@ def enrich_row_with_contacts(
         "official_website": collected["website"],
         "serper_source_score": serper_source_score,
         "emails_found": ", ".join(collected["emails"]),
+        "impressum_emails_found": ", ".join(collected.get("impressum_emails") or []),
         "phones_found": ", ".join(collected["phones"]),
         "contact_sources": ", ".join(collected["source_urls"]),
         "contact_source": row.get("contact_source", "serper"),

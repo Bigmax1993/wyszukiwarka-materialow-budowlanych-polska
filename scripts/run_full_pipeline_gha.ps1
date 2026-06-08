@@ -5,11 +5,13 @@ Uruchamia pelny pipeline GU na GitHub Actions (recznie, krok po kroku).
   powershell -ExecutionPolicy Bypass -File scripts\run_full_pipeline_gha.ps1
 
 Opcje:
-  -SkipDiscovery   zacznij od backfill (jesli discovery juz bylo)
+  -SkipDiscovery   pomin discovery + pierwszy sync
+  -SkipBackfill    pomin backfill (sync -> prep -> send po gotowym thu)
   -ForceResend     ponowna wysylka (--force-resend na obu partiach)
 #>
 param(
     [switch]$SkipDiscovery,
+    [switch]$SkipBackfill,
     [switch]$ForceResend
 )
 
@@ -51,8 +53,10 @@ if (-not $SkipDiscovery) {
     Invoke-GhaWorkflow "GU sobota discovery"
     Invoke-GhaWorkflow "Sync wyniki Google Drive"
 }
-Invoke-GhaWorkflow "GU niedziela backfill"
-Invoke-GhaWorkflow "Sync wyniki Google Drive"
+if (-not $SkipBackfill) {
+    Invoke-GhaWorkflow "GU niedziela backfill"
+}
+Invoke-GhaWorkflow "Sync wyniki Google Drive" @{ artifact_name = "de-gu-wyniki-thu" }
 Invoke-GhaWorkflow "GU poniedzialek prep"
 Invoke-GhaWorkflow "GU poniedzialek send" $sendFields
 Invoke-GhaWorkflow "GU wtorek send" $sendFields

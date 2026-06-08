@@ -26,25 +26,21 @@ jobs:
 
       - run: pip install -r requirements.txt -r requirements-drive.txt
 
-      - name: Resolve artifact (fri / thu / wed)
+      - name: Resolve artifact (thu → wed → mon → tue → fri)
         id: artifact_run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            ARTIFACT="de-gu-wyniki-fri"
-            RUN_ID="${{ github.event.workflow_run.id }}"
-          else
-            for ARTIFACT in de-gu-wyniki-fri de-gu-wyniki-tue de-gu-wyniki-mon de-gu-wyniki-thu de-gu-wyniki-wed; do
-              RUN_ID=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
-                --paginate --jq ".artifacts[] | select(.name==\"$ARTIFACT\" and .expired==false) | .workflow_run.id" | head -1)
-              if [ -n "$RUN_ID" ]; then
-                break
-              fi
-            done
-          fi
+          # Po niedzielnym backfillu (thu) — najświeższy Excel; fri/tue to starsze wysyłki.
+          for ARTIFACT in de-gu-wyniki-thu de-gu-wyniki-wed de-gu-wyniki-mon de-gu-wyniki-tue de-gu-wyniki-fri; do
+            RUN_ID=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
+              --paginate --jq ".artifacts[] | select(.name==\"$ARTIFACT\" and .expired==false) | .workflow_run.id" | head -1)
+            if [ -n "$RUN_ID" ]; then
+              break
+            fi
+          done
           if [ -z "$RUN_ID" ]; then
-            echo "::warning::Brak artefaktu (fri/thu/wed) — upload tylko jesli Wyniki/ w repo"
+            echo "::warning::Brak artefaktu (thu/wed/mon/tue/fri) — upload tylko jesli Wyniki/ w repo"
             echo "artifact=" >> "$GITHUB_OUTPUT"
             echo "run-id=" >> "$GITHUB_OUTPUT"
             exit 0

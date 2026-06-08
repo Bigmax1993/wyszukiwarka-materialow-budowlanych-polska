@@ -637,6 +637,8 @@ def is_cache_contact_not_store_builder(place_url: str, info: dict | None) -> boo
         and not info.get("retail_verified")
     ):
         return False
+    if (info.get("discovery_bundesland") or "").strip() and not email:
+        return False
     email = (info.get("email_target") or "").strip()
     if not email:
         found = (info.get("emails_found") or "").strip()

@@ -17,6 +17,8 @@ jobs:
         with:
           python-version: "3.12"
 
+      - run: pip install -r requirements.txt
+
       - name: Resolve latest de-gu-wyniki-fri
         id: prev
         continue-on-error: true

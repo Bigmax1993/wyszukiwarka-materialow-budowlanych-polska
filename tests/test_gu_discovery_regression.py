@@ -70,9 +70,13 @@ class SerperLimitRegression(unittest.TestCase):
         today = scraper.campaign_today()
         cache.setdefault("serper_daily", {})[today] = 300
         cache.setdefault("serper_limit_reached", {})[today] = True
+        cache["serper"] = {"q1": {"rows": []}}
+        cache["serper_discovery"] = {"q2": {"empty": True, "rows": []}}
         scraper.reset_serper_daily_for_discovery(cache)
         self.assertEqual(cache["serper_daily"][today], 0)
         self.assertNotIn(today, cache.get("serper_limit_reached", {}))
+        self.assertEqual(cache["serper"], {})
+        self.assertEqual(cache["serper_discovery"], {})
 
     def test_ensure_budget_raises_when_exhausted(self):
         cache = scraper._empty_cache()

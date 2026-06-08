@@ -142,6 +142,7 @@ from retail_store_builder_filter import (
     has_retail_references_or_portfolio,
     portfolio_negates_market_projects,
     is_cache_contact_not_store_builder,
+    is_generalunternehmer,
     is_loose_serper_discovery_candidate,
     is_serper_only_pending_candidate,
     is_media_publisher_contact,
@@ -150,6 +151,7 @@ from retail_store_builder_filter import (
     mentions_retail_store_build_activity,
     mentions_retail_store_build_activity_core,
 )
+import retail_store_builder_filter as _retail_store_builder_filter
 
 # Przy zapisie cache: usuń urzędy/instytucje z contacts (+ serper/gemini powiązane)
 ENABLE_CACHE_PURGE_INSTITUTIONS = True
@@ -396,6 +398,10 @@ GERMAN_STATES = [
 INQUIRY_REGION_DE = "Deutschland (bundesweit)"
 RETAIL_CHAINS_DE = "Aldi, Penny, Kaufland, Netto, Rewe,Edeka"
 DELIVERY_ADDRESS_DE = "Deutschland (bundesweit)"
+
+# Tylko Generalunternehmer (GU) — nie sam Ladenbau ani ogólne Bauunternehmen
+REQUIRE_GENERALUNTERNEHMER = True
+_retail_store_builder_filter.REQUIRE_GENERALUNTERNEHMER = REQUIRE_GENERALUNTERNEHMER
 
 # Weryfikacja www: GU/Filialbau + Neubau/Umbau (+ referencje mile widziane, nie wymagane)
 REQUIRE_WEBSITE_RETAIL_VERIFICATION = True
@@ -1233,8 +1239,14 @@ def _contact_context_text(row: dict) -> str:
     )
 
 
+def _row_has_gu_signal(row: dict) -> bool:
+    text = _contact_context_text(row)
+    ok, _ = is_generalunternehmer(text)
+    return ok
+
+
 def is_row_eligible_for_excel_export(row: dict) -> bool:
-    """Firma do arkusza Kontakte — z mailem lub bez (gdy zweryfikowany Filialbau)."""
+    """Firma do arkusza Kontakte — wyłącznie Generalunternehmer (GU)."""
     name = (row.get("company_name_clean") or row.get("nazwa") or "").strip()
     url = (row.get("url") or row.get("www") or row.get("official_website") or "").strip()
     if name.lower() == "nieznana firma" and not url:
@@ -1252,14 +1264,22 @@ def is_row_eligible_for_excel_export(row: dict) -> bool:
     if not EXPORT_PIPELINE_ROWS_WITHOUT_EMAIL:
         return False
     if row.get("retail_verified"):
+        if REQUIRE_GENERALUNTERNEHMER and not (
+            row.get("is_gu") or _row_has_gu_signal(row)
+        ):
+            return False
         return True
     if (row.get("verification_reason") or "").strip() == PENDING_WWW_VERIFY_REASON:
         return is_serper_only_pending_candidate(
             email=email, url=url, name=name, text=text
         )
-    return is_valid_retail_store_builder_contact(
+    if not is_valid_retail_store_builder_contact(
         email="", url=url, name=name, text=text
-    )
+    ):
+        return False
+    if REQUIRE_GENERALUNTERNEHMER and not _row_has_gu_signal(row):
+        return False
+    return True
 
 
 def build_export_rows(rows, logger=None, cache=None):
@@ -1306,6 +1326,8 @@ def build_export_rows(rows, logger=None, cache=None):
             "Handelsketten": (row.get("retail_chains_found") or "").strip(),
             "WWW_geprueft": "ja" if row.get("retail_verified") else "nein",
             "Kleinunternehmen": "ja" if row.get("is_small_firm") else "nein",
+            "GU": "ja" if row.get("is_gu") or _row_has_gu_signal(row) else "nein",
+            "GU_Marker": (row.get("gu_marker") or "").strip(),
         }
         if cache is not None and email:
             base = merge_export_row(base, cache, email, lang="de")
@@ -1514,6 +1536,8 @@ def row_from_cache_contact(place_url: str, info: dict) -> dict | None:
         "verification_reason": info.get("verification_reason") or "",
         "page_snippet": info.get("page_snippet") or "",
         "retail_chains_found": info.get("retail_chains_found") or "",
+        "is_gu": info.get("is_gu", False),
+        "gu_marker": info.get("gu_marker") or "",
     }
     if not is_row_eligible_for_excel_export(row_probe):
         return None
@@ -1757,6 +1781,10 @@ def build_email_jobs_from_cache_json(
             url=_url,
             name=_name,
             text=_text,
+        ):
+            continue
+        if REQUIRE_GENERALUNTERNEHMER and not (
+            info.get("is_gu") or is_generalunternehmer(_text)[0]
         ):
             continue
         if email_status == "sent" and not force_resend:
@@ -2282,6 +2310,12 @@ def _is_small_ladenbau_specialist(
     if is_likely_large_company(company_name, website, page_text)[0]:
         return False
     blob = (page_text or "").lower()
+    if REQUIRE_GENERALUNTERNEHMER:
+        gu_ok, _ = is_generalunternehmer(
+            f"{company_name or ''} {website or ''} {page_text or ''}"
+        )
+        if not gu_ok:
+            return False
     build_markers = (
         "bau",
         "generalunternehmer",
@@ -2312,6 +2346,10 @@ def page_mentions_retail_store_projects(text: str) -> tuple[bool, list[str], str
     low = (text or "").lower()
     if is_retail_store_operator_contact(text=low):
         return False, [], "einzelhandel_betrieb_kein_bau"
+    if REQUIRE_GENERALUNTERNEHMER:
+        gu_ok, _ = is_generalunternehmer(low)
+        if not gu_ok:
+            return False, [], "kein_generalunternehmer"
     if not mentions_retail_store_build_activity_core(low):
         return False, [], "kein_gu_filialbau_kontext"
     if REQUIRE_MARKET_PROJECTS_IN_PORTFOLIO and not has_retail_references_or_portfolio(
@@ -2323,7 +2361,7 @@ def page_mentions_retail_store_projects(text: str) -> tuple[bool, list[str], str
     has_build = any(k in low for k in RETAIL_BUILD_KEYWORDS)
     has_ref = has_retail_references_or_portfolio(low)
     has_trade = any(k in low for k in RETAIL_TRADE_ACTIVITY_KEYWORDS)
-    has_gu_bau = any(k in low for k in GU_ROLE_KEYWORDS) or "bauunternehmen" in low
+    has_gu_bau, _ = is_generalunternehmer(low)
     has_umbau = any(
         k in low
         for k in (
@@ -2462,6 +2500,18 @@ def gemini_verify_retail_small_company(
     return out
 
 
+def _finalize_verification_result(result: dict, blob: str) -> dict:
+    gu_ok, gu_marker = is_generalunternehmer(blob)
+    result["is_gu"] = gu_ok
+    result["gu_marker"] = gu_marker
+    if result.get("verified") and REQUIRE_GENERALUNTERNEHMER and not gu_ok:
+        result["verified"] = False
+        result["verification_reason"] = "kein_generalunternehmer"
+        result["is_gu"] = False
+        result["gu_marker"] = ""
+    return result
+
+
 def verify_company_on_website(
     company_name: str,
     website: str,
@@ -2473,7 +2523,7 @@ def verify_company_on_website(
 ) -> dict:
     """
     Wchodzi na stronę, sprawdza mała firma + sklepy dyskontowe.
-    Zwraca m.in. verified, retail_chains, verification_reason.
+    Zwraca m.in. verified, retail_chains, verification_reason, is_gu.
     """
     page_text, pages_checked = gather_website_text_for_verification(website, logger)
     blob = " ".join([page_text, serper_blob])
@@ -2481,72 +2531,87 @@ def verify_company_on_website(
         company_name, website, page_text, serper_blob
     )
     if large:
-        return {
-            "verified": False,
-            "is_small_firm": False,
-            "retail_chains": [],
-            "verification_reason": large_reason,
-            "verification_method": "rules",
-            "pages_checked": pages_checked,
-            "page_snippet": _truncate_page_snippet(page_text),
-        }
+        return _finalize_verification_result(
+            {
+                "verified": False,
+                "is_small_firm": False,
+                "retail_chains": [],
+                "verification_reason": large_reason,
+                "verification_method": "rules",
+                "pages_checked": pages_checked,
+                "page_snippet": _truncate_page_snippet(page_text),
+            },
+            blob,
+        )
 
     if _is_small_ladenbau_specialist(company_name, website, page_text):
         chains = detect_retail_chains_in_text(page_text)
-        return {
-            "verified": True,
-            "is_small_firm": True,
-            "retail_chains": chains,
-            "verification_reason": "kleiner_ladenbau_gu",
-            "verification_method": "bs4_rules",
-            "pages_checked": pages_checked,
-            "page_snippet": _truncate_page_snippet(page_text),
-        }
+        return _finalize_verification_result(
+            {
+                "verified": True,
+                "is_small_firm": True,
+                "retail_chains": chains,
+                "verification_reason": "kleiner_ladenbau_gu",
+                "verification_method": "bs4_rules",
+                "pages_checked": pages_checked,
+                "page_snippet": _truncate_page_snippet(page_text),
+            },
+            blob,
+        )
 
     rules_ok, chains, rules_reason = page_mentions_retail_store_projects(page_text)
     small_hint = any(m in blob.lower() for m in SMALL_COMPANY_PAGE_MARKERS)
     is_small = small_hint or not large
 
     if rules_ok and is_small:
-        return {
-            "verified": True,
-            "is_small_firm": True,
-            "retail_chains": chains,
-            "verification_reason": rules_reason,
-            "verification_method": "bs4_rules",
-            "pages_checked": pages_checked,
-            "page_snippet": _truncate_page_snippet(page_text),
-        }
+        return _finalize_verification_result(
+            {
+                "verified": True,
+                "is_small_firm": True,
+                "retail_chains": chains,
+                "verification_reason": rules_reason,
+                "verification_method": "bs4_rules",
+                "pages_checked": pages_checked,
+                "page_snippet": _truncate_page_snippet(page_text),
+            },
+            blob,
+        )
 
     if not rules_ok and serper_blob.strip():
         rules_ok2, chains2, rules_reason2 = page_mentions_retail_store_projects(
             serper_blob
         )
         if rules_ok2 and is_small:
-            return {
-                "verified": True,
-                "is_small_firm": True,
-                "retail_chains": chains2,
-                "verification_reason": f"serper_snippet:{rules_reason2}",
-                "verification_method": "bs4_rules",
-                "pages_checked": pages_checked,
-                "page_snippet": _truncate_page_snippet(page_text),
-            }
+            return _finalize_verification_result(
+                {
+                    "verified": True,
+                    "is_small_firm": True,
+                    "retail_chains": chains2,
+                    "verification_reason": f"serper_snippet:{rules_reason2}",
+                    "verification_method": "bs4_rules",
+                    "pages_checked": pages_checked,
+                    "page_snippet": _truncate_page_snippet(page_text),
+                },
+                blob,
+            )
         chains = chains or chains2
         rules_reason = rules_reason2 if not rules_ok else rules_reason
 
     reason = rules_reason if not rules_ok else (large_reason or "nicht_klein")
     if not is_small:
         reason = large_reason or "nicht_klein"
-    return {
-        "verified": False,
-        "is_small_firm": is_small,
-        "retail_chains": chains,
-        "verification_reason": reason,
-        "verification_method": "bs4_rules",
-        "pages_checked": pages_checked,
-        "page_snippet": _truncate_page_snippet(page_text),
-    }
+    return _finalize_verification_result(
+        {
+            "verified": False,
+            "is_small_firm": is_small,
+            "retail_chains": chains,
+            "verification_reason": reason,
+            "verification_method": "bs4_rules",
+            "pages_checked": pages_checked,
+            "page_snippet": _truncate_page_snippet(page_text),
+        },
+        blob,
+    )
 
 
 def score_serper_candidate(link: str, title: str = "", snippet: str = "", company_name: str = "") -> int:
@@ -4578,6 +4643,11 @@ def _process_email_jobs(
         ):
             status = f"suppressed_not_store_builder_{today}"
             mark_suppressed_target(cache, target, "not_store_builder")
+        elif REQUIRE_GENERALUNTERNEHMER and not (
+            contact_info.get("is_gu") or is_generalunternehmer(val_text)[0]
+        ):
+            status = f"suppressed_not_generalunternehmer_{today}"
+            mark_suppressed_target(cache, target, "not_generalunternehmer")
         elif not force_resend and is_suppressed_target(cache, target):
             status = f"suppressed_cached_{today}"
         elif not ignore_send_window and not is_within_send_window():
@@ -4717,6 +4787,8 @@ def enrich_row_with_contacts(
         row["verification_reason"] = verification.get("verification_reason", "")
         row["retail_chains_found"] = ", ".join(verification.get("retail_chains") or [])
         row["is_small_firm"] = verification.get("is_small_firm", False)
+        row["is_gu"] = verification.get("is_gu", False)
+        row["gu_marker"] = verification.get("gu_marker", "")
         if not verification.get("verified"):
             console_step(
                 f"Odrzucono (brak Einzelhandel/Hochbau-Filialbau): "
@@ -4817,10 +4889,12 @@ def enrich_row_with_contacts(
         "email_subject": subject,
         "email_body": body,
         "email_status": mail_status,
-        "retail_verified": True,
+        "retail_verified": verification.get("verified", False),
         "verification_reason": verification.get("verification_reason", "ok"),
         "retail_chains_found": ", ".join(verification.get("retail_chains") or []),
         "is_small_firm": verification.get("is_small_firm", True),
+        "is_gu": verification.get("is_gu", False),
+        "gu_marker": verification.get("gu_marker", ""),
     }
     extra["contact_quality_score"] = compute_contact_quality_score({**row, **extra})
     row.update(extra)
@@ -5402,8 +5476,14 @@ def _run_smoke_tests() -> None:
     assert is_valid_retail_store_builder_contact(
         email="info@logmar.net",
         url="https://www.logmar.net/",
-        name="Logmar Ladenbau GmbH",
-        text="Filialbau Aldi Rewe Referenzprojekte",
+        name="Logmar Generalunternehmer GmbH",
+        text="Generalunternehmer Filialbau Aldi Rewe Referenzprojekte",
+    )
+    assert not is_valid_retail_store_builder_contact(
+        email="info@ladenbau.de",
+        url="https://ladenbau.de",
+        name="HELIA Ladenbau GmbH",
+        text="Ladenbau Filialbau Neubau Gewerbe",
     )
     assert is_valid_retail_store_builder_contact(
         name="Bau GmbH",
@@ -5451,6 +5531,7 @@ def _run_smoke_tests() -> None:
     assert len(SERPER_DISCOVERY_BROAD_TERMS) >= 10
     assert len(SERPER_DISCOVERY_LANDKREIS_TERMS) >= 5
     assert len(SERPER_DISCOVERY_PLACES_TERMS) >= 5
+    assert REQUIRE_GENERALUNTERNEHMER is True
     assert PENDING_WWW_VERIFY_REASON == "pending_www_verify"
     assert MIN_VERIFIED_CONTACTS_ROTATION == 20
     assert DISCOVERY_MIN_PENDING_GHA_FAIL == 5
@@ -5458,12 +5539,22 @@ def _run_smoke_tests() -> None:
     from retail_store_builder_filter import is_serper_only_pending_candidate
 
     assert is_serper_only_pending_candidate(
+        name="Weber Generalunternehmer GmbH",
+        url="https://weber-gu.de",
+        text="Generalunternehmer Filialbau Ulm Gewerbe",
+    )
+    assert not is_serper_only_pending_candidate(
         name="HELIA Ladenbau GmbH", url="https://helia-ladenbau.de", text="Ladenbau Ulm"
     )
     assert not is_serper_only_pending_candidate(
         url="https://www.hi-heute.de/supermarkte", name="hi-heute.de", text="Nachrichten"
     )
     assert _is_small_ladenbau_specialist(
+        "Müller Generalunternehmer GmbH",
+        "https://mueller-ladenbau.de",
+        "Generalunternehmer für Ladenbau — Neubau und Umbau von Gewerbeobjekten.",
+    )
+    assert not _is_small_ladenbau_specialist(
         "Müller-Ladenbau GmbH",
         "https://mueller-ladenbau.de",
         "Wir realisieren Neubau und Umbau von Gewerbeobjekten.",
@@ -5501,6 +5592,18 @@ def _run_smoke_tests() -> None:
     assert EXPORT_PIPELINE_ROWS_WITHOUT_EMAIL is True
     assert is_row_eligible_for_excel_export(
         {
+            "nazwa": "Müller Generalunternehmer GmbH",
+            "url": "https://mueller-gu.de",
+            "email_target": "",
+            "retail_verified": True,
+            "is_gu": True,
+            "gu_marker": "generalunternehmer",
+            "verification_reason": "referenz_ladenbau",
+            "page_snippet": "Generalunternehmer Referenzprojekte Aldi Filialbau",
+        }
+    )
+    assert not is_row_eligible_for_excel_export(
+        {
             "nazwa": "Müller Ladenbau GmbH",
             "url": "https://mueller-ladenbau.de",
             "email_target": "",
@@ -5518,14 +5621,20 @@ def _run_smoke_tests() -> None:
                 "www": "https://test-bau.de",
                 "email_target": "",
                 "retail_verified": True,
+                "is_gu": True,
+                "gu_marker": "generalunternehmer",
                 "verification_reason": "referenz_filialbau",
-                "page_snippet": "Filialbau Referenzprojekte Supermarkt",
+                "page_snippet": "Generalunternehmer Filialbau Referenzprojekte Supermarkt",
             }
         ]
     )
     assert len(rows_export) == 1 and rows_export[0].get("E-mail") == ""
-    ok, chains, _ = page_mentions_retail_store_projects(
+    ok_laden_only, _, reason_laden_only = page_mentions_retail_store_projects(
         "Wir realisieren Aldi und Rewe Filialneubau im Ladenbau in Sachsen. Referenzen."
+    )
+    assert not ok_laden_only and reason_laden_only == "kein_generalunternehmer"
+    ok, chains, _ = page_mentions_retail_store_projects(
+        "Generalunternehmer: Wir realisieren Aldi und Rewe Filialneubau im Ladenbau in Sachsen. Referenzen."
     )
     assert ok and "aldi" in chains
     ok_hb, chains_hb, _ = page_mentions_retail_store_projects(

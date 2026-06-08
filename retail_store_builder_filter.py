@@ -1,15 +1,46 @@
 # -*- coding: utf-8 -*-
 """
-Kampania DE Ost: Generalunternehmer (GU) / Bauunternehmen, które:
+Kampania DE: wyłącznie Generalunternehmer (GU), którzy:
 - stawiają sklepy / filie (Neubau, Filialbau), lub
 - robią przebudowy / modernizacje marketów (Umbau, Revitalisierung).
-Nie: sieci handlowe jako operator, urzędy, portale, czysta Bausanierung bez EH.
+Nie: sam Ladenbau bez GU, ogólne Bauunternehmen, podwykonawcy, sieci handlowe, urzędy.
 """
 from __future__ import annotations
 
 from commercial_contact_filter import (
     is_non_commercial_contact,
     is_valid_commercial_company_contact,
+)
+
+# Współdzielone z de_gu_bauunternehmen_scraper.REQUIRE_GENERALUNTERNEHMER
+REQUIRE_GENERALUNTERNEHMER = True
+
+STRICT_GU_MARKERS = (
+    "generalunternehmer",
+    "generalunternehmen",
+    "generalunternehmerleistung",
+    "komplettgeneralunternehmer",
+    "komplettgeneralunternehmerleistung",
+    "hauptauftragnehmer",
+    "totalunternehmer",
+    "generalübernehmer",
+    "generaluebernehmer",
+    "gu-leistung",
+    " gu ",
+)
+
+NON_GU_ROLE_EXCLUSION_MARKERS = (
+    "subunternehmer",
+    "nachunternehmer",
+    "architekturbüro",
+    "architekturbuero",
+    "planungsbüro",
+    "planungsbuero",
+    "projektentwicklung",
+    "ingenieurbüro",
+    "ingenieurbaero",
+    "fachingenieur",
+    "projektmanagement ohne bau",
 )
 
 RETAIL_OPERATOR_DOMAIN_MARKERS = (
@@ -285,8 +316,27 @@ def _has_retail_store_context(low: str) -> bool:
     return any(m in low for m in RETAIL_STORE_CONTEXT_MARKERS)
 
 
+def is_excluded_non_gu_role(text: str) -> bool:
+    low = (text or "").lower()
+    return any(m in low for m in NON_GU_ROLE_EXCLUSION_MARKERS)
+
+
+def is_generalunternehmer(text: str) -> tuple[bool, str]:
+    """True tylko gdy tekst zawiera marker GU (bez samodzielnego bauunternehmen/ladenbau)."""
+    low = (text or "").lower()
+    if is_excluded_non_gu_role(low):
+        return False, "excluded_non_gu_role"
+    for marker in STRICT_GU_MARKERS:
+        if marker in low:
+            return True, marker.strip()
+    return False, ""
+
+
 def is_gu_or_retail_build_specialist(text: str) -> bool:
     low = (text or "").lower()
+    if REQUIRE_GENERALUNTERNEHMER:
+        ok, _ = is_generalunternehmer(low)
+        return ok
     if any(m in low for m in GU_BUILDER_MARKERS):
         return True
     return any(m in low for m in FILIALBAU_SPECIALIST_MARKERS)
@@ -486,16 +536,8 @@ def mentions_retail_store_build_activity(text: str) -> bool:
     return mentions_retail_store_build_activity_core(low)
 
 
-_SERPER_ONLY_ROLE_MARKERS = (
-    "ladenbau",
-    "filialbau",
-    "generalunternehmer",
-    "bauunternehmen",
-    "laden-und",
-    "storebau",
-    "filialumbau",
-    "einzelhandelsbau",
-)
+_SERPER_ONLY_GU_MARKERS = STRICT_GU_MARKERS
+_SERPER_ONLY_ROLE_MARKERS = _SERPER_ONLY_GU_MARKERS
 _SERPER_ONLY_TRADE_MARKERS = (
     "laden",
     "filial",
@@ -530,11 +572,13 @@ def is_serper_only_pending_candidate(
     if not is_valid_commercial_company_contact(email=email, url=url, name=name):
         return False
     low = combined.lower()
-    if "ladenbau" in low or "filialbau" in low:
-        return True
-    has_role = any(m in low for m in _SERPER_ONLY_ROLE_MARKERS)
+    if is_excluded_non_gu_role(low):
+        return False
+    gu_ok, _ = is_generalunternehmer(low)
+    if not gu_ok:
+        return False
     has_trade = any(m in low for m in _SERPER_ONLY_TRADE_MARKERS)
-    return has_role and has_trade
+    return has_trade
 
 
 def is_loose_serper_discovery_candidate(

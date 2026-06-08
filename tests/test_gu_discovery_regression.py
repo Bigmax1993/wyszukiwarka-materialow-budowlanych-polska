@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 
 import de_gu_bauunternehmen_scraper as scraper
 from retail_store_builder_filter import (
+    is_generalunternehmer,
     is_loose_serper_discovery_candidate,
     is_serper_only_pending_candidate,
 )
@@ -84,9 +85,27 @@ class SerperLimitRegression(unittest.TestCase):
         )
 
 
+class StrictGuFilterRegression(unittest.TestCase):
+    def test_is_generalunternehmer_positive(self):
+        ok, marker = is_generalunternehmer(
+            "Weber Generalunternehmer GmbH Filialbau Supermarkt"
+        )
+        self.assertTrue(ok)
+        self.assertEqual(marker, "generalunternehmer")
+
+    def test_is_generalunternehmer_rejects_ladenbau_only(self):
+        ok, marker = is_generalunternehmer("HELIA Ladenbau GmbH Filialbau Neubau")
+        self.assertFalse(ok)
+        self.assertEqual(marker, "")
+
+    def test_is_generalunternehmer_rejects_bauunternehmen_only(self):
+        ok, _ = is_generalunternehmer("Bauunternehmen Müller GmbH Gewerbebau")
+        self.assertFalse(ok)
+
+
 class SerperOnlyFilterRegression(unittest.TestCase):
-    def test_accepts_ladenbau_without_neubau_in_snippet(self):
-        self.assertTrue(
+    def test_rejects_ladenbau_without_gu_in_snippet(self):
+        self.assertFalse(
             is_serper_only_pending_candidate(
                 name="HELIA Ladenbau GmbH",
                 url="https://helia-ladenbau.de",
@@ -132,7 +151,19 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             is_loose_serper_discovery_candidate(name=name, text=text, url=url)
         )
 
-    def test_pending_row_eligible_for_excel(self):
+    def test_pending_row_eligible_for_excel_when_gu_in_snippet(self):
+        row = {
+            "nazwa": "Weber Generalunternehmer GmbH",
+            "url": "https://weber-gu.de",
+            "www": "https://weber-gu.de",
+            "retail_verified": False,
+            "verification_reason": scraper.PENDING_WWW_VERIFY_REASON,
+            "page_snippet": "Generalunternehmer Filialbau Gewerbebau",
+            "email_target": "",
+        }
+        self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
+
+    def test_pending_row_rejected_without_gu(self):
         row = {
             "nazwa": "HELIA Ladenbau GmbH",
             "url": "https://helia-ladenbau.de",
@@ -141,7 +172,7 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             "verification_reason": scraper.PENDING_WWW_VERIFY_REASON,
             "email_target": "",
         }
-        self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
+        self.assertFalse(scraper.is_row_eligible_for_excel_export(row))
 
 
 class SmallCompanyFilterRegression(unittest.TestCase):
@@ -185,8 +216,15 @@ class SmallCompanyFilterRegression(unittest.TestCase):
 
 
 class SmallLadenbauVerifyRegression(unittest.TestCase):
-    def test_is_small_ladenbau_specialist(self):
+    def test_is_small_ladenbau_specialist_requires_gu(self):
         self.assertTrue(
+            scraper._is_small_ladenbau_specialist(
+                "Müller Generalunternehmer GmbH",
+                "https://mueller-ladenbau.de",
+                "Generalunternehmer für Ladenbau — Neubau und Umbau von Gewerbeobjekten.",
+            )
+        )
+        self.assertFalse(
             scraper._is_small_ladenbau_specialist(
                 "Müller-Ladenbau GmbH",
                 "https://mueller-ladenbau.de",
@@ -204,7 +242,24 @@ class SmallLadenbauVerifyRegression(unittest.TestCase):
         )
 
     @patch.object(scraper, "gather_website_text_for_verification")
-    def test_verify_small_ladenbau_path(self, mock_gather):
+    def test_verify_small_ladenbau_path_requires_gu(self, mock_gather):
+        mock_gather.return_value = (
+            "Generalunternehmer für Ladenbau und Gewerbebau Neubau regional.",
+            ["https://helia-ladenbau.de"],
+        )
+        result = scraper.verify_company_on_website(
+            "HELIA Generalunternehmer GmbH",
+            "https://helia-ladenbau.de",
+            _LOGGER,
+            {},
+        )
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["verification_reason"], "kleiner_ladenbau_gu")
+        self.assertTrue(result["is_small_firm"])
+        self.assertTrue(result["is_gu"])
+
+    @patch.object(scraper, "gather_website_text_for_verification")
+    def test_verify_rejects_ladenbau_without_gu(self, mock_gather):
         mock_gather.return_value = (
             "Wir realisieren Ladenbau und Gewerbebau Neubau regional.",
             ["https://helia-ladenbau.de"],
@@ -215,9 +270,11 @@ class SmallLadenbauVerifyRegression(unittest.TestCase):
             _LOGGER,
             {},
         )
-        self.assertTrue(result["verified"])
-        self.assertEqual(result["verification_reason"], "kleiner_ladenbau_gu")
-        self.assertTrue(result["is_small_firm"])
+        self.assertFalse(result["verified"])
+        self.assertIn(
+            result["verification_reason"],
+            ("kein_generalunternehmer", "kein_gu_filialbau_kontext"),
+        )
 
     @patch.object(scraper, "gather_website_text_for_verification")
     def test_verify_rejects_large_konzern(self, mock_gather):

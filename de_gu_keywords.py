@@ -54,23 +54,23 @@ RETAIL_CHAINS_ROTATION = (
 
 TERM_TEMPLATES = (
     "Generalunternehmer Filialbau {city} {chain} Referenzprojekte",
-    "Bauunternehmen Ladenbau {city} {land} {chain} Neubau",
+    "Generalunternehmer Ladenbau {city} {land} {chain} Neubau",
     "GU Hochbau Supermarktbau {city} {chain} regional",
     "Generalunternehmer Einzelhandelsbau {city} Familienunternehmen",
-    "Ladenbau Generalunternehmer {city} Filialumbau {chain}",
-    "Bauunternehmen Gewerbebau {city} Discounter {chain} Referenz",
+    "Generalunternehmer {city} Filialumbau {chain}",
+    "GU Gewerbebau {city} Discounter {chain} Referenz",
 )
 
-# Krótsze frazy — lepsze trafienia Serper (bez sieci handlowych w query)
+# Krótsze frazy Serper — każda musi zawierać Generalunternehmer lub GU
 SIMPLE_TERM_TEMPLATES = (
-    "Bauunternehmen Filialbau {city}",
+    "Generalunternehmer Filialbau {city}",
     "Generalunternehmer {city}",
-    "Ladenbau {city}",
     "GU Hochbau {city}",
-    "Bauunternehmen Einzelhandel {city}",
+    "Generalunternehmer Einzelhandel {city}",
     "Generalunternehmer Supermarktbau {city}",
-    "Bauunternehmen Gewerbebau {city}",
-    "Ladenbau Generalunternehmer {city}",
+    "GU Gewerbebau {city}",
+    "Komplettgeneralunternehmer {city}",
+    "Generalunternehmer Ladenbau {city}",
 )
 
 BUNDESLAND_CONFIG: dict[str, dict] = {
@@ -297,14 +297,14 @@ def build_landkreis_discovery_terms(active: list[str] | None = None) -> list[str
         for city in BUNDESLAND_CONFIG[land]["cities"][:6]:
             for raw in (
                 f"Generalunternehmer Filialbau Landkreis {city}",
-                f"Ladenbau {city} Kreis {short}",
-                f"Bauunternehmen Gewerbebau {city} Landkreis",
+                f"Generalunternehmer Ladenbau {city} Kreis {short}",
+                f"GU Gewerbebau {city} Landkreis",
             ):
                 _append_unique_term(terms, seen, raw, max_terms=10_000)
         _append_unique_term(
             terms,
             seen,
-            f"Bauunternehmen Filialbau {land} Landkreis",
+            f"Generalunternehmer Filialbau {land} Landkreis",
             max_terms=10_000,
         )
     return terms
@@ -318,9 +318,9 @@ def build_places_discovery_terms(active: list[str] | None = None) -> list[str]:
     for land in lands:
         for city in BUNDESLAND_CONFIG[land]["cities"][:8]:
             for raw in (
-                f"Ladenbau {city}",
-                f"Filialbau {city}",
-                f"Bauunternehmen {city}",
+                f"Generalunternehmer Filialbau {city}",
+                f"Generalunternehmer Ladenbau {city}",
+                f"GU Hochbau {city}",
                 f"Generalunternehmer {city}",
             ):
                 _append_unique_term(terms, seen, raw, max_terms=10_000)
@@ -342,17 +342,17 @@ def build_broad_discovery_terms(active: list[str] | None = None) -> list[str]:
         short = BUNDESLAND_CONFIG[land]["short"]
         for city in BUNDESLAND_CONFIG[land]["cities"]:
             for raw in (
-                f"Bauunternehmen {city}",
+                f"Generalunternehmer {city}",
                 f"Generalunternehmer {city} Bau",
-                f"Ladenbau {city} GmbH",
-                f"Filialbau {city}",
+                f"GU Filialbau {city}",
+                f"Generalunternehmer Ladenbau {city}",
             ):
                 _append_unique_term(terms, seen, raw, max_terms=10_000)
         for raw in (
-            f"Bauunternehmen Filialbau {land}",
+            f"Generalunternehmer Filialbau {land}",
             f"Generalunternehmer Ladenbau {land}",
             f"GU Filialbau {short}",
-            f"Bauunternehmen Supermarktbau {land}",
+            f"GU Supermarktbau {land}",
             f"Generalunternehmer Einzelhandel {land}",
         ):
             _append_unique_term(terms, seen, raw, max_terms=10_000)
@@ -368,8 +368,8 @@ def build_fallback_terms(active: list[str] | None = None) -> list[str]:
             [
                 f"Generalunternehmer Filialbau {land}",
                 f"Generalunternehmer Hochbau Einzelhandel {short}",
-                f"Ladenbau Generalunternehmer {land} Referenz",
-                f"Bauunternehmen Supermarktbau {land} regional",
+                f"Generalunternehmer Ladenbau {land} Referenz",
+                f"GU Supermarktbau {land} regional",
             ]
         )
     fb.extend(

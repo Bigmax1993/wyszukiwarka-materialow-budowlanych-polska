@@ -49,6 +49,7 @@ if ($ForceResend) { $sendFields["force_resend"] = "true" }
 
 if (-not $SkipDiscovery) {
     Invoke-GhaWorkflow "GU sobota discovery"
+    Invoke-GhaWorkflow "Sync wyniki Google Drive"
 }
 Invoke-GhaWorkflow "GU niedziela backfill"
 Invoke-GhaWorkflow "Sync wyniki Google Drive"

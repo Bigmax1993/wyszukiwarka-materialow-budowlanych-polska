@@ -32,20 +32,17 @@ jobs:
 
       - run: pip install -r requirements.txt -r requirements-drive.txt
 
-      - name: Resolve artifact (thu → wed → mon → tue → fri)
+      - name: Resolve artifact (najnowszy thu/wed/mon/tue/fri)
         id: artifact_run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Po niedzielnym backfillu (thu) — najświeższy Excel; fri/tue to starsze wysyłki.
-          for ARTIFACT in de-gu-wyniki-thu de-gu-wyniki-wed de-gu-wyniki-mon de-gu-wyniki-tue de-gu-wyniki-fri; do
-            RUN_ID=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
-              --paginate --jq ".artifacts[] | select(.name==\"$ARTIFACT\" and .expired==false) | .workflow_run.id" | head -1)
-            if [ -n "$RUN_ID" ]; then
-              break
-            fi
-          done
-          if [ -z "$RUN_ID" ]; then
+          # Najswiezszy artefakt z pipeline (np. wed po sobocie, thu po niedzieli).
+          PICK=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
+            --paginate --jq '[.artifacts[] | select(.expired==false) | select(.name=="de-gu-wyniki-thu" or .name=="de-gu-wyniki-wed" or .name=="de-gu-wyniki-mon" or .name=="de-gu-wyniki-tue" or .name=="de-gu-wyniki-fri")] | sort_by(.created_at) | reverse | .[0] // empty')
+          ARTIFACT=$(echo "$PICK" | jq -r '.name // empty')
+          RUN_ID=$(echo "$PICK" | jq -r '.workflow_run.id // empty')
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
             echo "::warning::Brak artefaktu (thu/wed/mon/tue/fri) — upload tylko jesli Wyniki/ w repo"
             echo "artifact=" >> "$GITHUB_OUTPUT"
             echo "run-id=" >> "$GITHUB_OUTPUT"

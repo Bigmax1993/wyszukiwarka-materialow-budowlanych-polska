@@ -219,6 +219,18 @@ class SerperOnlyFilterRegression(unittest.TestCase):
         }
         self.assertFalse(scraper.is_row_eligible_for_excel_export(row))
 
+    def test_discovered_row_stays_in_excel_after_verify_reject(self):
+        row = {
+            "nazwa": "BAUTAL GU GmbH",
+            "url": "https://bautal-gu.de",
+            "bundesland": "Nordrhein-Westfalen",
+            "discovery_bundesland": "Nordrhein-Westfalen",
+            "retail_verified": False,
+            "verification_reason": "kein_generalunternehmer",
+            "email_target": "",
+        }
+        self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
+
 
 class SmallCompanyFilterRegression(unittest.TestCase):
     def test_rejects_hochtief_domain(self):

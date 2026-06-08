@@ -1302,6 +1302,9 @@ def is_row_eligible_for_excel_export(row: dict) -> bool:
         return False
     if is_retail_store_operator_contact(url=url, email=email, text=text):
         return False
+    land = (row.get("discovery_bundesland") or row.get("bundesland") or "").strip()
+    if land and url and name and not email:
+        return True
     if (row.get("verification_reason") or "").strip() == PENDING_WWW_VERIFY_REASON:
         if not (url and name):
             return False
@@ -6056,7 +6059,9 @@ if __name__ == "__main__":
             cache = load_cache(logger)
             stats = backfill_emails_in_cache(cache, logger)
             save_cache(cache, logger)
-            all_rows = build_all_rows_from_cache(cache)
+            cache_rows = build_all_rows_from_cache(cache)
+            existing_rows, _ = load_existing_output(OUTPUT_FILE, logger)
+            all_rows = merge_pipeline_rows(existing_rows, cache_rows)
             save_excel(all_rows, OUTPUT_FILE, logger, cache=cache)
             print(
                 f"[BACKFILL] cache zapisany → {CACHE_FILE}\n"

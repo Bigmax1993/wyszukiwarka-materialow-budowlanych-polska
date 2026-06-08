@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = "Stop"
 $script:RepoRoot = Split-Path $PSScriptRoot -Parent
 $script:GuCampaignDir = $script:RepoRoot
-$script:DefaultRunConfig = "run_config\welle_nrw_by_bw.json"
+$script:DefaultRunConfig = "run_config\mfg_gu_de.json"
 
 function Import-KanbudDotEnv {
     $libs = if ($env:KANBUD_PROJECT_ROOT) { $env:KANBUD_PROJECT_ROOT } else { Join-Path $RepoRoot "libs" }

@@ -20,6 +20,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import de_gu_bauunternehmen_scraper as scraper
+from de_gu_keywords import (
+    ALL_BUNDESLAENDER,
+    default_max_discovery_terms_for,
+)
 from retail_store_builder_filter import (
     is_generalunternehmer,
     is_loose_serper_discovery_candidate,
@@ -27,6 +31,37 @@ from retail_store_builder_filter import (
 )
 
 _LOGGER = logging.getLogger("test_gu_discovery_regression")
+
+
+class BundesweitRegression(unittest.TestCase):
+    def test_default_covers_all_bundeslaender(self):
+        self.assertEqual(len(ALL_BUNDESLAENDER), 16)
+        self.assertEqual(len(scraper.CAMPAIGN_ACTIVE_BUNDESLAENDER), 16)
+
+    def test_bundesweit_has_many_discovery_terms(self):
+        self.assertGreaterEqual(len(scraper.SERPER_DISCOVERY_TERMS), 500)
+        self.assertGreaterEqual(
+            default_max_discovery_terms_for(list(ALL_BUNDESLAENDER)), 2000
+        )
+
+    def test_serper_only_target_uses_new_rows_not_total(self):
+        rows = [{"url": f"https://example.de/{i}"} for i in range(200)]
+        self.assertFalse(
+            scraper._discovery_target_reached(
+                rows,
+                total_new_rows=10,
+                rotate_mode=False,
+                serper_only=True,
+            )
+        )
+        self.assertTrue(
+            scraper._discovery_target_reached(
+                rows,
+                total_new_rows=scraper.MIN_CONTACTS_TARGET,
+                rotate_mode=False,
+                serper_only=True,
+            )
+        )
 
 
 class SerperLimitRegression(unittest.TestCase):

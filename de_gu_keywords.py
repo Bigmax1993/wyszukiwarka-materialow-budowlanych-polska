@@ -196,14 +196,23 @@ BUNDESLAND_CONFIG: dict[str, dict] = {
     },
 }
 
-# Fala 1 (domyślnie): najwięcej Filialbau
-DEFAULT_ACTIVE_BUNDESLAENDER: list[str] = [
-    "Nordrhein-Westfalen",
-    "Bayern",
-    "Baden-Wuerttemberg",
-]
+# Całe Niemcy (16 Bundesländer)
+ALL_BUNDESLAENDER: tuple[str, ...] = tuple(BUNDESLAND_CONFIG.keys())
+DEFAULT_ACTIVE_BUNDESLAENDER: list[str] = list(ALL_BUNDESLAENDER)
 
 CAMPAIGN_ACTIVE_BUNDESLAENDER: list[str] = list(DEFAULT_ACTIVE_BUNDESLAENDER)
+
+# Więcej fraz Serper przy kampanii bundesweit (unlimited API w pipeline GHA)
+BUNDESWEIT_MAX_DISCOVERY_TERMS = 2400
+
+
+def default_max_discovery_terms_for(active: list[str] | None = None) -> int:
+    n = len(resolve_active_bundeslaender(active))
+    if n <= 1:
+        return 120
+    if n <= 3:
+        return 360
+    return BUNDESWEIT_MAX_DISCOVERY_TERMS
 
 
 def _normalize_land_key(name: str) -> str:
@@ -259,8 +268,12 @@ def _append_unique_term(terms: list[str], seen: set[str], text: str, *, max_term
     return len(terms) >= max_terms
 
 
-def build_discovery_terms(active: list[str] | None = None, *, max_terms: int = 96) -> list[str]:
+def build_discovery_terms(
+    active: list[str] | None = None, *, max_terms: int | None = None
+) -> list[str]:
     lands = resolve_active_bundeslaender(active)
+    if max_terms is None:
+        max_terms = default_max_discovery_terms_for(lands)
     seen: set[str] = set()
     terms: list[str] = []
     chain_i = 0
@@ -284,6 +297,16 @@ def build_discovery_terms(active: list[str] | None = None, *, max_terms: int = 9
                     max_terms=max_terms,
                 ):
                     return terms
+    if len(lands) >= 10:
+        for raw in (
+            "Generalunternehmer Filialbau Deutschland Referenzprojekte",
+            "GU Supermarktbau Deutschland Rewe Aldi",
+            "Generalunternehmer Einzelhandel Deutschland Neubau",
+            "Komplettgeneralunternehmer Filialbau bundesweit",
+            "Generalunternehmer Ladenbau Deutschland regional",
+        ):
+            if _append_unique_term(terms, seen, raw, max_terms=max_terms):
+                return terms
     return terms
 
 
@@ -402,11 +425,13 @@ def configure_campaign_bundeslaender(
     module,
     names: list[str],
     *,
-    max_discovery_terms: int = 120,
+    max_discovery_terms: int | None = None,
 ) -> list[str]:
     """Ustawia aktywne landy i przeładowuje listy Serper na module scrapera."""
     global CAMPAIGN_ACTIVE_BUNDESLAENDER
     active = resolve_active_bundeslaender(names)
+    if max_discovery_terms is None:
+        max_discovery_terms = default_max_discovery_terms_for(active)
     CAMPAIGN_ACTIVE_BUNDESLAENDER = active
     module.CAMPAIGN_ACTIVE_BUNDESLAENDER = active
     module.SERPER_DISCOVERY_TERMS = build_discovery_terms(

@@ -13,6 +13,7 @@ permissions:
 env:
   SCRAPER_TIMEZONE: Europe/Warsaw
   DISABLE_SEND_WINDOW: "1"
+  SERPER_UNLIMITED: "1"
   KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
 
 jobs:
@@ -57,8 +58,8 @@ jobs:
           run-id: ${{ steps.prev_run.outputs.run-id }}
           path: .
 
-      - name: Discovery (rotacja 1 Bundesland, serper-only)
-        run: python de_gu_bauunternehmen_scraper.py --rotate-bundesland --serper-only-discovery --no-auto-email
+      - name: Discovery (całe Niemcy, serper-only)
+        run: python de_gu_bauunternehmen_scraper.py --run-config run_config/mfg_gu_de.json --serper-only-discovery --no-auto-email
 
       - name: Upload Wyniki artifact
         if: always()

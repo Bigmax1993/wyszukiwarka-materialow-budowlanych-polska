@@ -14,6 +14,6 @@ if ($args.Count -gt 0 -and $args[0] -like "run_config\*") {
     Write-Host "[SOBOTA] Discovery (reczny run_config): $config"
     python de_gu_bauunternehmen_scraper.py --run-config $config @rest
 } else {
-    Write-Host "[SOBOTA] Discovery: rotacja Bundesland (serper-only, 1 land / sobota)"
-    python de_gu_bauunternehmen_scraper.py --rotate-bundesland --serper-only-discovery --no-auto-email @args
+    Write-Host "[SOBOTA] Discovery: całe Niemcy (serper-only, bundesweit)"
+    python de_gu_bauunternehmen_scraper.py --run-config run_config\mfg_gu_de.json --serper-only-discovery --no-auto-email @args
 }

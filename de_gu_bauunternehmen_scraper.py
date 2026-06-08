@@ -91,6 +91,9 @@ def apply_gu_run_config_extras(module, data: dict) -> None:
         "enable_gemini_discovery_terms",
         "enable_gemini_page_verify",
         "require_generalunternehmer",
+        "require_market_projects_in_portfolio",
+        "require_website_references_or_portfolio",
+        "serper_unlimited",
     )
     for key in _bool_keys:
         if key in data:
@@ -238,6 +241,8 @@ SERPER_COUNTRY = "de"
 SERPER_LANGUAGE = "de"
 SERPER_TIMEOUT = 20
 SERPER_DAILY_LIMIT = 300
+# True lub env SERPER_UNLIMITED=1 → brak dziennego limitu (pełny pipeline GHA)
+SERPER_UNLIMITED = False
 FORCE_SERPER_LOOKUP = True
 SERPER_DISCOVERY_RESULTS_PER_TERM = 30
 COUNTRY_RESTRICTION = "DE"
@@ -430,10 +435,10 @@ DELIVERY_ADDRESS_DE = "Deutschland (bundesweit)"
 REQUIRE_GENERALUNTERNEHMER = True
 _retail_store_builder_filter.REQUIRE_GENERALUNTERNEHMER = REQUIRE_GENERALUNTERNEHMER
 
-# Weryfikacja www: GU/Filialbau + Neubau/Umbau (+ referencje mile widziane, nie wymagane)
+# Weryfikacja www: GU/Filialbau + Neubau/Umbau + obowiązkowy dowód projektów marketów
 REQUIRE_WEBSITE_RETAIL_VERIFICATION = True
-REQUIRE_WEBSITE_REFERENCES_OR_PORTFOLIO = False
-REQUIRE_MARKET_PROJECTS_IN_PORTFOLIO = False
+REQUIRE_WEBSITE_REFERENCES_OR_PORTFOLIO = True
+REQUIRE_MARKET_PROJECTS_IN_PORTFOLIO = True
 ENABLE_GEMINI_RETAIL_VERIFICATION = False
 ENABLE_GEMINI_PAGE_VERIFY = True
 ENABLE_GEMINI_DISCOVERY_TERMS = True
@@ -547,6 +552,17 @@ _OST_GU_SMTP_PORT_STARTTLS = 587
 
 def _ost_gu_truthy(raw: str) -> bool:
     return str(raw or "").strip().lower() in ("1", "true", "yes", "tak", "on")
+
+
+def is_serper_unlimited() -> bool:
+    """Pełny pipeline: wykorzystaj Serper bez dziennego limitu (env lub run_config)."""
+    if SERPER_UNLIMITED:
+        return True
+    import os
+
+    return _ost_gu_truthy(os.getenv("SERPER_UNLIMITED", "")) or _ost_gu_truthy(
+        os.getenv("DISABLE_SERPER_DAILY_LIMIT", "")
+    )
 
 
 def _ost_gu_split_recipients(raw: str) -> list[str]:
@@ -2056,6 +2072,12 @@ def get_remaining_daily_serper_limit(cache: dict):
     today = campaign_today()
     daily = cache.setdefault("serper_daily", {})
     used_today = int(daily.get(today, 0))
+    if is_serper_unlimited():
+        remaining = 10**9
+        console_step(
+            f"Serper {today}: genutzt={used_today}, unlimited (pipeline)"
+        )
+        return today, used_today, remaining
     remaining = max(0, SERPER_DAILY_LIMIT - used_today)
     console_step(
         f"Serper-Limit {today}: genutzt={used_today}, rest={remaining}, max={SERPER_DAILY_LIMIT}"
@@ -2095,6 +2117,8 @@ def reset_serper_daily_for_discovery(cache: dict) -> None:
 
 
 def ensure_serper_budget_or_fail(cache: dict) -> None:
+    if is_serper_unlimited():
+        return
     _, used_today, remaining = get_remaining_daily_serper_limit(cache)
     if remaining <= 0:
         raise RuntimeError(
@@ -2186,7 +2210,38 @@ def count_pending_for_bundesland(
     return count
 
 
+def count_all_pending_contacts(rows: list, cache: dict) -> int:
+    """Wszystkie kandydaty pending_www_verify (bundesweit)."""
+    seen: set[str] = set()
+    count = 0
+    for row in rows or []:
+        if (row.get("verification_reason") or "").strip() != PENDING_WWW_VERIFY_REASON:
+            continue
+        if row.get("retail_verified"):
+            continue
+        url = (row.get("url") or row.get("www") or "").strip()
+        if url and url in seen:
+            continue
+        if url:
+            seen.add(url)
+        count += 1
+    for url, info in (cache.get("contacts") or {}).items():
+        if not isinstance(info, dict):
+            continue
+        if (info.get("verification_reason") or "").strip() != PENDING_WWW_VERIFY_REASON:
+            continue
+        if info.get("retail_verified"):
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        count += 1
+    return count
+
+
 def is_serper_limit_reached_today(cache: dict) -> bool:
+    if is_serper_unlimited():
+        return False
     today = campaign_today()
     daily = cache.setdefault("serper_daily", {})
     used_today = int(daily.get(today, 0))
@@ -2450,8 +2505,8 @@ def detect_retail_chains_in_text(text: str) -> list[str]:
 
 def page_mentions_retail_store_projects(text: str) -> tuple[bool, list[str], str]:
     """
-    GU/Filialbau (Neubau/Umbau Märkte). Referenzen/Portfolio mile widziane, nie wymagane
-    (gdy REQUIRE_MARKET_PROJECTS_IN_PORTFOLIO=False).
+    GU/Filialbau (Neubau/Umbau Märkte) + dowód projektów marketów na www
+    (Referenzen, Portfolio, zdjęcia sklepów lub opisy projektów).
     """
     low = (text or "").lower()
     if is_retail_store_operator_contact(text=low):
@@ -2502,6 +2557,8 @@ def page_mentions_retail_store_projects(text: str) -> tuple[bool, list[str], str
         if has_ref:
             return True, chains, "referenz_optional"
         return True, chains, "gu_filialbau_kontext"
+    if has_ref:
+        return True, chains, "markt_referenz_nachweis"
     return False, chains, "keine_referenzen_portfolio"
 
 
@@ -2623,7 +2680,10 @@ def _needs_gemini_discovery_supplement(
         pending = count_pending_for_bundesland(all_rows, cache, rotation_land or "")
         return pending < MIN_CONTACTS_TARGET
     return not _discovery_target_reached(
-        all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+        all_rows,
+        total_new_rows=total_new_rows,
+        rotate_mode=rotate_mode,
+        serper_only=serper_only,
     )
 
 
@@ -2662,13 +2722,14 @@ def _run_gemini_discovery_supplement(
         ):
             break
 
-        _, _, remaining = get_remaining_daily_serper_limit(cache)
-        if remaining <= SERPER_DISCOVERY_RESERVE:
-            console_step(
-                f"Gemini discovery: rezerwa Serper ({remaining} <= "
-                f"{SERPER_DISCOVERY_RESERVE})"
-            )
-            break
+        if not is_serper_unlimited():
+            _, _, remaining = get_remaining_daily_serper_limit(cache)
+            if remaining <= SERPER_DISCOVERY_RESERVE:
+                console_step(
+                    f"Gemini discovery: rezerwa Serper ({remaining} <= "
+                    f"{SERPER_DISCOVERY_RESERVE})"
+                )
+                break
 
         pending_before = count_pending_for_bundesland(
             all_rows, cache, rotation_land or ""
@@ -5179,8 +5240,10 @@ def _discovery_target_reached(
     *,
     total_new_rows: int,
     rotate_mode: bool,
+    serper_only: bool = False,
 ) -> bool:
-    if rotate_mode:
+    # Tygodniowy pipeline: cel = nowe firmy w runie (nie łączna liczba w Excelu)
+    if rotate_mode or serper_only:
         return total_new_rows >= MIN_CONTACTS_TARGET
     return len(all_rows) >= MIN_CONTACTS_TARGET
 
@@ -5346,11 +5409,14 @@ def _process_serper_terms(
         print(f"{term}: +{added}{suffix}")
         persist_progress(all_rows, cache, logger, reason=f"Ende {term}")
         if _discovery_target_reached(
-            all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+            all_rows,
+            total_new_rows=total_new_rows,
+            rotate_mode=rotate_mode,
+            serper_only=serper_only,
         ):
             metric = (
                 f"{total_new_rows} nowych"
-                if rotate_mode
+                if (rotate_mode or serper_only)
                 else f"{len(all_rows)} łącznie"
             )
             console_step(
@@ -5444,6 +5510,10 @@ def run_scraper(
         )
     else:
         print(f"[TARGET] min. kontaktów: {MIN_CONTACTS_TARGET}")
+        print(
+            f"[BUNDESWEIT] {len(CAMPAIGN_ACTIVE_BUNDESLAENDER)} Bundesländer: "
+            f"{', '.join(CAMPAIGN_ACTIVE_BUNDESLAENDER)}"
+        )
 
     cache = load_cache(logger)
     if serper_only and discovery_mode != "emails_only" and not rebuild_from_cache:
@@ -5518,9 +5588,14 @@ def run_scraper(
                 **serper_kw,
             )
             if not stop_requested and not _discovery_target_reached(
-                all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+                all_rows,
+                total_new_rows=total_new_rows,
+                rotate_mode=rotate_mode,
+                serper_only=serper_only,
             ):
-                metric = total_new_rows if rotate_mode else len(all_rows)
+                metric = (
+                    total_new_rows if (rotate_mode or serper_only) else len(all_rows)
+                )
                 console_step(
                     f"Za mało kontaktów ({metric}). Fallback Serper bez filtra odległości."
                 )
@@ -5531,9 +5606,14 @@ def run_scraper(
                     **serper_kw,
                 )
             if not stop_requested and not _discovery_target_reached(
-                all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+                all_rows,
+                total_new_rows=total_new_rows,
+                rotate_mode=rotate_mode,
+                serper_only=serper_only,
             ):
-                metric = total_new_rows if rotate_mode else len(all_rows)
+                metric = (
+                    total_new_rows if (rotate_mode or serper_only) else len(all_rows)
+                )
                 console_step(
                     f"Za mało kontaktów ({metric}). Broad Serper — krótkie frazy."
                 )
@@ -5544,9 +5624,14 @@ def run_scraper(
                     **serper_kw,
                 )
             if not stop_requested and not _discovery_target_reached(
-                all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+                all_rows,
+                total_new_rows=total_new_rows,
+                rotate_mode=rotate_mode,
+                serper_only=serper_only,
             ):
-                metric = total_new_rows if rotate_mode else len(all_rows)
+                metric = (
+                    total_new_rows if (rotate_mode or serper_only) else len(all_rows)
+                )
                 console_step(
                     f"Za mało kontaktów ({metric}). Landkreis Serper — frazy Kreis."
                 )
@@ -5560,10 +5645,15 @@ def run_scraper(
                 not stop_requested
                 and ENABLE_SERPER_PLACES_ENDPOINT
                 and not _discovery_target_reached(
-                    all_rows, total_new_rows=total_new_rows, rotate_mode=rotate_mode
+                    all_rows,
+                    total_new_rows=total_new_rows,
+                    rotate_mode=rotate_mode,
+                    serper_only=serper_only,
                 )
             ):
-                metric = total_new_rows if rotate_mode else len(all_rows)
+                metric = (
+                    total_new_rows if (rotate_mode or serper_only) else len(all_rows)
+                )
                 console_step(
                     f"Za mało kontaktów ({metric}). Serper Places API."
                 )
@@ -5623,7 +5713,18 @@ def run_scraper(
                         "Sprawdź [LEjek] w logu."
                     )
             elif serper_only:
+                pending_all = count_all_pending_contacts(all_rows, cache)
                 log_discovery_funnel(funnel, logger)
+                console_step(
+                    f"Serper-only bundesweit: {total_new_rows} nowych, "
+                    f"{pending_all} pending ({PENDING_WWW_VERIFY_REASON})."
+                )
+                if pending_all < DISCOVERY_MIN_PENDING_GHA_FAIL:
+                    raise RuntimeError(
+                        f"Za mało kandydatów pending ({pending_all} < "
+                        f"{DISCOVERY_MIN_PENDING_GHA_FAIL}) w całych Niemczech. "
+                        "Sprawdź [LEjek] w logu."
+                    )
 
         if enable_auto_email:
             reenrich_contacts_for_mailing(

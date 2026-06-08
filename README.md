@@ -1,4 +1,4 @@
-﻿# Wyszukiwarka partnerów — kampania GU (bundesweit)
+# Wyszukiwarka partnerów — kampania GU (bundesweit)
 
 
 

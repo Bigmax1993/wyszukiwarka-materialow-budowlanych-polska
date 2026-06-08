@@ -184,6 +184,37 @@ MARKET_PHOTO_GALLERY_MARKERS = (
     "baustellenbilder",
 )
 
+# Opisy projektów bez zakładki „Referenzen”
+RETAIL_PROJECT_DESCRIPTION_MARKERS = (
+    "projektbeschreibung",
+    "projektinfo",
+    "objektbeschreibung",
+    "leistungsübersicht",
+    "leistungsuebersicht",
+    "baubeschreibung",
+    "projektdetails",
+    "errichtet",
+    "realisiert",
+    "fertiggestellt",
+    "wir haben",
+    "wir realisieren",
+    "unsere leistungen",
+)
+
+RETAIL_PROJECT_BUILD_ACTIVITY_MARKERS = (
+    "neubau",
+    "umbau",
+    "errichtung",
+    "realisierung",
+    "fertigstellung",
+    "bauprojekt",
+    "erweiterung",
+    "neueröffnung",
+    "neueroeffnung",
+)
+
+RETAIL_IMAGE_FILE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
+
 # Sekcja Referenzen / Portfolio (opcjonalna — wystarczą też zdjęcia/alt marketów)
 PORTFOLIO_SECTION_MARKERS = (
     "referenzen",
@@ -424,10 +455,55 @@ def _portfolio_negates_market_projects(low: str) -> bool:
     )
 
 
+def _has_retail_project_image_paths(low: str) -> bool:
+    """Ścieżki/alt obrazów sklepów (np. rewe-filiale.jpg) — bez sekcji Referenzen."""
+    if _portfolio_negates_market_projects(low):
+        return False
+    if not any(ext in low for ext in RETAIL_IMAGE_FILE_EXTENSIONS):
+        return False
+    retail_hint = _has_retail_store_context(low) or any(
+        chain in low for chain in RETAIL_CHAIN_IN_PORTFOLIO_MARKERS
+    )
+    if not retail_hint:
+        return False
+    return any(
+        hint in low
+        for hint in (
+            *RETAIL_PROJECT_BUILD_ACTIVITY_MARKERS,
+            "supermarkt",
+            "filiale",
+            "filial",
+            "discounter",
+            "markt",
+            "projekt",
+            "bau",
+        )
+    )
+
+
+def _has_retail_project_description_evidence(low: str) -> bool:
+    """Opisy realizacji marketów na stronie głównej / podstronach (bez Referenzen)."""
+    if _portfolio_negates_market_projects(low):
+        return False
+    if not _has_retail_store_context(low):
+        return False
+    if not any(m in low for m in RETAIL_PROJECT_BUILD_ACTIVITY_MARKERS):
+        return False
+    if any(chain in low for chain in RETAIL_CHAIN_IN_PORTFOLIO_MARKERS):
+        return True
+    if any(m in low for m in RETAIL_PROJECT_DESCRIPTION_MARKERS):
+        return True
+    if _has_retail_project_image_paths(low):
+        return True
+    return False
+
+
 def _has_market_photo_gallery_context(low: str) -> bool:
     """Zdjęcia / galeria z marketami (bez nagłówka Portfolio)."""
     if _portfolio_negates_market_projects(low):
         return False
+    if _has_retail_project_image_paths(low):
+        return True
     if not any(m in low for m in MARKET_PHOTO_GALLERY_MARKERS):
         return False
     return _has_retail_store_context(low) or any(
@@ -483,11 +559,15 @@ def _has_market_projects_evidence(low: str) -> bool:
             or "verbrauchermarkt" in low
         ):
             return not _portfolio_negates_market_projects(low)
+    if _has_retail_project_description_evidence(low):
+        return True
+    if _has_retail_project_image_paths(low):
+        return True
     return False
 
 
 def has_market_project_evidence_on_website(text: str) -> bool:
-    """Projekty niemieckich marketów: tekst, referencje lub zdjęcia (alt/src)."""
+    """Projekty marketów: Referenzen/Portfolio, zdjęcia sklepów (alt/src) lub opisy."""
     return _has_market_projects_evidence((text or "").lower())
 
 

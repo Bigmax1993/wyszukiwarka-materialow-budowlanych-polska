@@ -13,8 +13,10 @@ if str(ROOT) not in sys.path:
 
 import de_gu_bauunternehmen_scraper as scraper
 from retail_store_builder_filter import (
+    detect_required_retail_chains,
     has_market_project_evidence_on_website,
     has_retail_references_or_portfolio,
+    has_required_retail_chain_mention,
 )
 
 
@@ -50,11 +52,28 @@ class RetailReferenceEvidence(unittest.TestCase):
 
     def test_page_verify_requires_reference_when_enabled(self):
         text = (
-            "Generalunternehmer Filialbau. Neubau Supermarkt. "
-            "Bild /uploads/marktneubau-hamburg.webp realisiert."
+            "Generalunternehmer Filialbau. Neubau Rewe Supermarkt. "
+            "Bild /uploads/rewe-marktneubau-hamburg.webp realisiert."
+        )
+        ok, chains, reason = scraper.page_mentions_retail_store_projects(text)
+        self.assertTrue(ok, reason)
+        self.assertIn("rewe", chains)
+
+    def test_rejects_gu_without_named_chain(self):
+        text = (
+            "Generalunternehmer Filialbau. Referenzen: Neubau Supermarkt "
+            "img alt='Filiale Neubau' src='/uploads/marktneubau.jpg'"
         )
         ok, _, reason = scraper.page_mentions_retail_store_projects(text)
-        self.assertTrue(ok, reason)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "keine_handelskette")
+
+    def test_required_chain_detection(self):
+        self.assertTrue(has_required_retail_chain_mention("Referenzprojekt Aldi Nord"))
+        self.assertEqual(
+            set(detect_required_retail_chains("Penny und Lidl")), {"penny", "lidl"}
+        )
+        self.assertFalse(has_required_retail_chain_mention("Kaufland Markt Neubau"))
 
 
 class SerperUnlimited(unittest.TestCase):

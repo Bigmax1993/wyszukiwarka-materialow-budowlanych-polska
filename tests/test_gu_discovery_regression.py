@@ -163,7 +163,7 @@ class SerperOnlyFilterRegression(unittest.TestCase):
         self.assertTrue(
             is_serper_only_pending_candidate(
                 name="Bau GmbH",
-                text="Generalunternehmer Filialbau Gewerbe",
+                text="Generalunternehmer Filialbau Gewerbe Referenz Rewe",
             )
         )
 
@@ -189,7 +189,7 @@ class SerperOnlyFilterRegression(unittest.TestCase):
         """Serper-only akceptuje GU+Gewerbe bez Neubau/Umbau w snippetcie."""
         name = "Bau GmbH"
         url = "https://example-bau-stuttgart.de"
-        text = "Generalunternehmer Stuttgart Gewerbebau Handwerk"
+        text = "Generalunternehmer Stuttgart Gewerbebau Handwerk Referenz Aldi"
         self.assertTrue(
             is_serper_only_pending_candidate(name=name, text=text, url=url)
         )
@@ -202,7 +202,16 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             is_serper_only_pending_candidate(
                 name="BAUTAL GU GmbH, Wuppertal",
                 url="https://bautal-gu.de",
-                text="Bauunternehmen Wuppertal",
+                text="Bauunternehmen Wuppertal Referenz Edeka Filialbau",
+            )
+        )
+
+    def test_serper_only_rejects_gu_without_named_chain(self):
+        self.assertFalse(
+            is_serper_only_pending_candidate(
+                name="Weber Generalunternehmer GmbH",
+                url="https://weber-gu.de",
+                text="Generalunternehmer Filialbau Gewerbebau",
             )
         )
 
@@ -225,8 +234,12 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             "Strona www": "https://bautal-gu.de",
             "WWW_geprueft": "nein",
             "E-mail": "",
+            "Handelsketten": "rewe",
+            "GU": "ja",
         }
         row = scraper.row_from_excel_record(rec)
+        row["verification_reason"] = scraper.PENDING_WWW_VERIFY_REASON
+        row["page_snippet"] = "Generalunternehmer Referenz Rewe Filialbau"
         self.assertEqual(row.get("verification_reason"), scraper.PENDING_WWW_VERIFY_REASON)
         self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
 
@@ -258,8 +271,10 @@ class SerperOnlyFilterRegression(unittest.TestCase):
                 "email_target": "info@k-in.de",
                 "retail_verified": True,
                 "is_gu": True,
+                "is_small_firm": True,
+                "retail_chains_found": "rewe",
                 "verification_reason": "ok",
-                "page_snippet": "Generalunternehmer Ladenbau",
+                "page_snippet": "Generalunternehmer Ladenbau Referenz Rewe",
             }
         ]
         scraper.sync_pipeline_rows_to_contacts_cache(rows, cache)
@@ -299,7 +314,7 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             "www": "https://weber-gu.de",
             "retail_verified": False,
             "verification_reason": scraper.PENDING_WWW_VERIFY_REASON,
-            "page_snippet": "Generalunternehmer Filialbau Gewerbebau",
+            "page_snippet": "Generalunternehmer Filialbau Gewerbebau Referenz Lidl",
             "email_target": "",
         }
         self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
@@ -315,7 +330,7 @@ class SerperOnlyFilterRegression(unittest.TestCase):
         }
         self.assertFalse(scraper.is_row_eligible_for_excel_export(row))
 
-    def test_discovered_row_stays_in_excel_after_verify_reject(self):
+    def test_discovered_row_rejected_after_verify_without_chain(self):
         row = {
             "nazwa": "BAUTAL GU GmbH",
             "url": "https://bautal-gu.de",
@@ -325,7 +340,20 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             "verification_reason": "kein_generalunternehmer",
             "email_target": "",
         }
-        self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
+        self.assertFalse(scraper.is_row_eligible_for_excel_export(row))
+
+    def test_verified_row_rejected_when_not_small(self):
+        row = {
+            "nazwa": "Müller GU GmbH",
+            "url": "https://mueller-gu.de",
+            "retail_verified": True,
+            "is_gu": True,
+            "is_small_firm": False,
+            "retail_chains_found": "rewe",
+            "page_snippet": "Generalunternehmer Referenz Rewe",
+            "email_target": "",
+        }
+        self.assertFalse(scraper.is_row_eligible_for_excel_export(row))
 
 
 class SmallCompanyFilterRegression(unittest.TestCase):
@@ -398,7 +426,8 @@ class SmallLadenbauVerifyRegression(unittest.TestCase):
     @patch.object(scraper, "gather_website_text_for_verification")
     def test_verify_small_ladenbau_path_requires_gu(self, mock_gather):
         mock_gather.return_value = (
-            "Generalunternehmer für Ladenbau und Gewerbebau Neubau regional.",
+            "Generalunternehmer für Ladenbau. Referenzen: Neubau Rewe Filiale. "
+            "img alt='Rewe Filiale' src='/uploads/rewe-filiale.jpg'",
             ["https://helia-ladenbau.de"],
         )
         result = scraper.verify_company_on_website(
@@ -408,7 +437,7 @@ class SmallLadenbauVerifyRegression(unittest.TestCase):
             {},
         )
         self.assertTrue(result["verified"])
-        self.assertEqual(result["verification_reason"], "kleiner_ladenbau_gu")
+        self.assertIn("rewe", result.get("retail_chains") or [])
         self.assertTrue(result["is_small_firm"])
         self.assertTrue(result["is_gu"])
 
@@ -428,7 +457,14 @@ class SmallLadenbauVerifyRegression(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertIn(
             result["verification_reason"],
-            ("kein_generalunternehmer", "kein_gu_filialbau_kontext"),
+            (
+                "kein_generalunternehmer",
+                "kein_gu_filialbau_kontext",
+                "keine_handelskette",
+                "kein_markt_nachweis",
+                "nicht_klein",
+                "kein_kleinunternehmen",
+            ),
         )
 
     @patch.object(scraper, "ENABLE_GEMINI_PAGE_VERIFY", False)

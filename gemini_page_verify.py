@@ -16,6 +16,9 @@ from campaign_keyword_profile import (
     retail_context_keywords_sample,
 )
 from retail_store_builder_filter import (
+    REQUIRED_RETAIL_CHAIN_KEYWORDS,
+    detect_required_retail_chains,
+    has_required_retail_chain_mention,
     is_excluded_non_gu_role,
     is_generalunternehmer,
     is_media_publisher_contact,
@@ -148,8 +151,19 @@ def apply_gemini_page_verdict(
     if not gemini.get("has_retail_context"):
         return False, "gemini_kein_retail", gemini.get("matched_chains") or []
 
+    required_set = set(REQUIRED_RETAIL_CHAIN_KEYWORDS)
+    gemini_chains = [
+        c.lower()
+        for c in (gemini.get("matched_chains") or [])
+        if c and c.lower() in required_set
+    ]
+    blob_chains = detect_required_retail_chains(blob)
+    chains = list(dict.fromkeys(gemini_chains + blob_chains))
+    if not chains and not has_required_retail_chain_mention(blob):
+        return False, "keine_handelskette", []
+
     reason = (gemini.get("reason") or "gemini_gu_retail").strip()
-    return True, f"gemini:{reason[:120]}", gemini.get("matched_chains") or []
+    return True, f"gemini:{reason[:120]}", chains
 
 
 def gemini_verify_company_page(

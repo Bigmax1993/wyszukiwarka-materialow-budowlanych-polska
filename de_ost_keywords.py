@@ -139,6 +139,16 @@ GU_ROLE_KEYWORDS = (
     "gu ",
 )
 
+# Obowiązkowe sieci w referencjach / na stronie (bez wzmianki → odrzucenie)
+REQUIRED_RETAIL_CHAIN_KEYWORDS = (
+    "aldi",
+    "rewe",
+    "edeka",
+    "lidl",
+    "netto",
+    "penny",
+)
+
 RETAIL_CHAIN_KEYWORDS = (
     "aldi",
     "aldi nord",

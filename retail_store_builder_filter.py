@@ -15,6 +15,25 @@ from commercial_contact_filter import (
 # Współdzielone z de_gu_bauunternehmen_scraper.REQUIRE_GENERALUNTERNEHMER
 REQUIRE_GENERALUNTERNEHMER = True
 
+REQUIRED_RETAIL_CHAIN_KEYWORDS = (
+    "aldi",
+    "rewe",
+    "edeka",
+    "lidl",
+    "netto",
+    "penny",
+)
+
+
+def detect_required_retail_chains(text: str) -> list[str]:
+    """Wymagane sieci: Aldi, Rewe, Edeka, Lidl, Netto, Penny."""
+    low = (text or "").lower()
+    return [c for c in REQUIRED_RETAIL_CHAIN_KEYWORDS if c in low]
+
+
+def has_required_retail_chain_mention(text: str) -> bool:
+    return bool(detect_required_retail_chains(text))
+
 STRICT_GU_MARKERS = (
     "generalunternehmer",
     "generalunternehmen",
@@ -652,6 +671,8 @@ def is_serper_only_pending_candidate(
     if not is_valid_commercial_company_contact(email=email, url=url, name=name):
         return False
     low = combined.lower()
+    if not has_required_retail_chain_mention(low):
+        return False
     if is_excluded_non_gu_role(low):
         return False
     gu_ok, _ = is_generalunternehmer(low)
@@ -683,6 +704,8 @@ def is_loose_serper_discovery_candidate(
     if is_retail_store_operator_contact(url=url, email=email, text=combined):
         return False
     if not is_valid_commercial_company_contact(email=email, url=url, name=name):
+        return False
+    if not has_required_retail_chain_mention(combined):
         return False
     return mentions_retail_store_build_activity_core(combined)
 

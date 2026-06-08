@@ -980,6 +980,75 @@ def _is_rate_limit_error(err: Exception) -> bool:
     return status == 429
 
 
+_SERPER_QUOTA_ERROR_MARKERS = (
+    "402",
+    "payment required",
+    "not enough credit",
+    "insufficient credit",
+    "no credits",
+    "out of credits",
+    "credit balance",
+    "credits exhausted",
+    "quota exceeded",
+    "ran out of credits",
+)
+
+
+def _is_serper_quota_error(err: Exception) -> bool:
+    """True gdy Serper odrzuca zapytanie z powodu braku kredytów (nie dziennego limitu)."""
+    text = str(err).lower()
+    if any(m in text for m in _SERPER_QUOTA_ERROR_MARKERS):
+        return True
+    resp = getattr(err, "response", None)
+    if resp is None:
+        return False
+    status = getattr(resp, "status_code", None)
+    if status == 402:
+        return True
+    try:
+        body = resp.json()
+        if not isinstance(body, dict):
+            return False
+        msg = str(body.get("message") or body.get("error") or "").lower()
+        if any(x in msg for x in ("credit", "balance", "payment", "quota")):
+            return status in (402, 403, 400) or "credit" in msg
+    except Exception:
+        pass
+    return False
+
+
+def is_serper_api_exhausted(cache: dict | None) -> bool:
+    """Kredyty Serper wyczerpane dziś — nie wysyłaj kolejnych zapytań API."""
+    if not cache:
+        return False
+    today = campaign_today()
+    flags = cache.get("serper_api_exhausted") or {}
+    return bool(flags.get(today))
+
+
+def mark_serper_api_exhausted(cache: dict, reason: str = "") -> None:
+    today = campaign_today()
+    cache.setdefault("serper_api_exhausted", {})[today] = (
+        reason or "credits_exhausted"
+    )[:240]
+    mark_serper_limit_reached_today(cache)
+    console_step(
+        "Serper API: brak kredytów — zatrzymuję discovery, "
+        "pipeline przechodzi dalej z zebranymi danymi."
+    )
+
+
+def handle_serper_api_failure(
+    cache: dict, err: Exception, logger: logging.Logger
+) -> bool:
+    """True = wyczerpane kredyty API (nie kontynuuj Serper w tym runie)."""
+    if _is_serper_quota_error(err):
+        mark_serper_api_exhausted(cache, str(err)[:240])
+        logger.warning("Serper API quota exhausted: %s", err)
+        return True
+    return False
+
+
 def is_gemini_rate_limited(cache: dict | None) -> bool:
     if not cache:
         return False
@@ -1654,6 +1723,7 @@ def _empty_cache() -> dict:
         "serper_discovery": {},
         "serper_term_stats": {},
         "serper_limit_reached": {},
+        "serper_api_exhausted": {},
         "gemini_discovery_terms": {},
         "gemini_page_verify": {},
     }
@@ -4002,6 +4072,9 @@ def search_official_website_with_serper(company_name: str, address: str, logger:
     if is_serper_limit_reached_today(cache):
         serper_cache[query] = ""
         return ""
+    if is_serper_api_exhausted(cache):
+        serper_cache[query] = ""
+        return ""
     today, used_today, remaining = get_remaining_daily_serper_limit(cache)
     if remaining <= 0:
         mark_serper_limit_reached_today(cache)
@@ -4023,6 +4096,9 @@ def search_official_website_with_serper(company_name: str, address: str, logger:
         )
         data = resp.json()
     except Exception as e:
+        if handle_serper_api_failure(cache, e, logger):
+            serper_cache[query] = ""
+            return ""
         logger.warning(f"Serper Fehler '{query}': {e}")
         serper_cache[query] = ""
         return ""
@@ -4260,6 +4336,9 @@ def discover_places_with_serper(
     if is_serper_limit_reached_today(cache):
         console_step("Serper Discovery: Tageslimit")
         return []
+    if is_serper_api_exhausted(cache):
+        console_step("Serper Discovery: API-Kontingent aufgebraucht")
+        return []
     api_url = SERPER_PLACES_API_URL if use_places_endpoint else SERPER_API_URL
     headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
     payload = {
@@ -4285,6 +4364,8 @@ def discover_places_with_serper(
         )
         data = resp.json()
     except Exception as e:
+        if handle_serper_api_failure(cache, e, logger):
+            return []
         console_step(f"Serper Discovery Fehler: {e}")
         return []
 
@@ -5624,7 +5705,8 @@ def _process_serper_terms(
     by_domain = index_all_rows_by_domain(all_rows)
     contacts_cache = cache.setdefault("contacts", {})
     for term in terms:
-        if stop_requested:
+        if stop_requested or is_serper_api_exhausted(cache):
+            stop_requested = True
             break
         console_step(f"Serper ({label}): {term}")
         rows = discover_places_with_serper(
@@ -5636,6 +5718,9 @@ def _process_serper_terms(
             serper_only=serper_only,
             funnel=funnel,
         )
+        if is_serper_api_exhausted(cache):
+            stop_requested = True
+            break
         added = 0
         refreshed = 0
         for r in rows:
@@ -6059,11 +6144,17 @@ def run_scraper(
                     f"({PENDING_WWW_VERIFY_REASON})."
                 )
                 if pending_land < DISCOVERY_MIN_PENDING_GHA_FAIL:
-                    raise RuntimeError(
-                        f"Za mało kandydatów pending ({pending_land} < "
-                        f"{DISCOVERY_MIN_PENDING_GHA_FAIL}) dla {rotation_land}. "
-                        "Sprawdź [LEjek] w logu."
-                    )
+                    if is_serper_api_exhausted(cache):
+                        console_step(
+                            f"Serper API wyczerpane — kontynuuj z {pending_land} pending "
+                            f"(poniżej progu {DISCOVERY_MIN_PENDING_GHA_FAIL})."
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"Za mało kandydatów pending ({pending_land} < "
+                            f"{DISCOVERY_MIN_PENDING_GHA_FAIL}) dla {rotation_land}. "
+                            "Sprawdź [LEjek] w logu."
+                        )
             elif serper_only:
                 pending_all = count_all_pending_contacts(all_rows, cache)
                 log_discovery_funnel(funnel, logger)
@@ -6072,11 +6163,17 @@ def run_scraper(
                     f"{pending_all} pending ({PENDING_WWW_VERIFY_REASON})."
                 )
                 if pending_all < DISCOVERY_MIN_PENDING_GHA_FAIL:
-                    raise RuntimeError(
-                        f"Za mało kandydatów pending ({pending_all} < "
-                        f"{DISCOVERY_MIN_PENDING_GHA_FAIL}) w całych Niemczech. "
-                        "Sprawdź [LEjek] w logu."
-                    )
+                    if is_serper_api_exhausted(cache):
+                        console_step(
+                            f"Serper API wyczerpane — kontynuuj z {pending_all} pending "
+                            f"(poniżej progu {DISCOVERY_MIN_PENDING_GHA_FAIL})."
+                        )
+                    else:
+                        raise RuntimeError(
+                            f"Za mało kandydatów pending ({pending_all} < "
+                            f"{DISCOVERY_MIN_PENDING_GHA_FAIL}) w całych Niemczech. "
+                            "Sprawdź [LEjek] w logu."
+                        )
 
         if enable_auto_email:
             reenrich_contacts_for_mailing(

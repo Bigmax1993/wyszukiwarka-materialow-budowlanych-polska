@@ -71,6 +71,47 @@ class GeminiThrottleRegression(unittest.TestCase):
         self.assertEqual(scraper.GEMINI_MIN_SECONDS_BETWEEN_CALLS, 15)
 
 
+class SerperQuotaExhaustionRegression(unittest.TestCase):
+    def test_detects_402_quota_error(self):
+        class FakeResp:
+            status_code = 402
+
+            def json(self):
+                return {"message": "Not enough credits"}
+
+        class FakeErr(Exception):
+            response = FakeResp()
+
+        self.assertTrue(scraper._is_serper_quota_error(FakeErr()))
+
+    def test_mark_exhausted_stops_further_discovery(self):
+        cache = scraper._empty_cache()
+        scraper.mark_serper_api_exhausted(cache, "402 Payment Required")
+        self.assertTrue(scraper.is_serper_api_exhausted(cache))
+        self.assertTrue(scraper.is_serper_limit_reached_today(cache))
+
+    def test_process_terms_stops_when_api_exhausted(self):
+        cache = scraper._empty_cache()
+        scraper.mark_serper_api_exhausted(cache, "test")
+        all_rows: list = []
+        total, stopped = scraper._process_serper_terms(
+            ["Generalunternehmer Filialbau Berlin Rewe"] * 5,
+            "test",
+            all_rows=all_rows,
+            seen_global=set(),
+            cache=cache,
+            logger=_LOGGER,
+            enable_auto_email=False,
+            apply_distance_filter=False,
+            max_new_rows=None,
+            total_new_rows=0,
+            stop_requested=False,
+            serper_only=True,
+        )
+        self.assertTrue(stopped)
+        self.assertEqual(total, 0)
+
+
 class SerperLimitRegression(unittest.TestCase):
     def test_reset_clears_daily_counter(self):
         cache = scraper._empty_cache()

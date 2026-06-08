@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Gemini: ekstrakcja i walidacja danych kontaktowych ze strony www (Impressum/Kontakt).
-Zastępuje regex na tekście strony — mailto:/tel: w HTML nadal parsowane osobno.
+Ekstrakcja kontaktów po parse HTML: Gemini z tekstu strony, potem regex w scraperze.
+Wyłącz ENABLE_GEMINI_CONTACT_EXTRACTION → sam regex (fallback).
 """
 from __future__ import annotations
 

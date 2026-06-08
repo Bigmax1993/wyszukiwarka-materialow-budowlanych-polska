@@ -656,10 +656,13 @@ def is_serper_only_pending_candidate(
     url: str = "",
     name: str = "",
     text: str = "",
+    search_term: str = "",
 ) -> bool:
     """
     Sobota (serper-only): luźny filtr na tytule/snippetcie.
     Bez wymogu Neubau/Umbau — weryfikacja małej firmy w niedzielę.
+    Sieć handlowa: w snippetcie LUB w frazie Serper (Google rzadko powtarza
+    „Lidl/Rewe” w snippetcie mimo trafnej strony).
     """
     combined = _blob(name, url, email, text)
     if is_non_commercial_contact(email=email, url=url, name=name):
@@ -671,7 +674,8 @@ def is_serper_only_pending_candidate(
     if not is_valid_commercial_company_contact(email=email, url=url, name=name):
         return False
     low = combined.lower()
-    if not has_required_retail_chain_mention(low):
+    chain_context = f"{low} {(search_term or '').lower()}".strip()
+    if not has_required_retail_chain_mention(chain_context):
         return False
     if is_excluded_non_gu_role(low):
         return False

@@ -4310,7 +4310,10 @@ def discover_places_with_serper(
             title = (item.get("title") or "").strip()
             snippet = (item.get("snippet") or item.get("address") or "").strip()
             if not candidate_filter(
-                url=link, name=title, text=f"{title} {snippet}"
+                url=link,
+                name=title,
+                text=f"{title} {snippet}",
+                search_term=term,
             ):
                 if funnel is not None:
                     funnel["filtered_serper"] = funnel.get("filtered_serper", 0) + 1

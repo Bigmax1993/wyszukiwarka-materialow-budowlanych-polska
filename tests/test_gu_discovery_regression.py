@@ -215,6 +215,17 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             )
         )
 
+    def test_serper_only_accepts_chain_from_search_term_not_snippet(self):
+        """Snippet bez nazwy sieci — fraza Serper zawiera Lidl."""
+        self.assertTrue(
+            is_serper_only_pending_candidate(
+                name="Müller GU GmbH",
+                url="https://mueller-gu-koeln.de",
+                text="Generalunternehmer Filialbau Köln Referenzprojekte",
+                search_term="Generalunternehmer Köln Filialumbau Lidl",
+            )
+        )
+
     def test_pending_not_purged_from_cache(self):
         from retail_store_builder_filter import is_cache_contact_not_store_builder
 

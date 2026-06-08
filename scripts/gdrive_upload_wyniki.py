@@ -10,6 +10,7 @@ Zmienne:
   GDRIVE_FOLDER_ID — docelowy folder (domyślnie GU Bauunternehmen)
   GDRIVE_SHARED_DRIVE_ID — opcjonalnie ID dysku współdzielonego (auto-wykrywanie, jeśli puste)
   GDRIVE_IMPERSONATE_EMAIL — opcjonalnie e-mail użytkownika Workspace (domain-wide delegation)
+  GDRIVE_VERSION_XLSX — 1 (domyślnie): każdy .xlsx jako nowy plik z datą, bez nadpisywania
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import json
 import mimetypes
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +46,30 @@ _LIST_OPTS = {
 }
 
 _GU_FOLDER_NAME = "GU Bauunternehmen Wyniki"
+
+
+def _gdrive_version_xlsx_enabled() -> bool:
+    raw = (os.environ.get("GDRIVE_VERSION_XLSX") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _upload_stamp() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(os.environ.get("SCRAPER_TIMEZONE", "Europe/Warsaw"))
+        return datetime.now(tz).strftime("%Y-%m-%d_%H%M")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d_%H%M")
+
+
+def versioned_xlsx_upload_name(filename: str, *, stamp: str | None = None) -> str:
+    """de_gu_bauunternehmen_kontakte.xlsx → de_gu_bauunternehmen_kontakte_2026-06-08_1405.xlsx"""
+    path = Path(filename)
+    if path.suffix.lower() != ".xlsx":
+        return path.name
+    tag = stamp or _upload_stamp()
+    return f"{path.stem}_{tag}{path.suffix}"
 
 
 def _load_oauth_credentials():
@@ -272,10 +298,32 @@ def _find_or_create_folder(service, parent_id: str, name: str) -> str:
     return _create_folder(service, parent_id, name)
 
 
-def _upload_file(service, MediaFileUpload, local: Path, parent_id: str) -> str:
+def _upload_file(
+    service,
+    MediaFileUpload,
+    local: Path,
+    parent_id: str,
+    *,
+    version_xlsx: bool | None = None,
+) -> str:
     mime, _ = mimetypes.guess_type(str(local))
     media = MediaFileUpload(str(local), mimetype=mime or "application/octet-stream", resumable=True)
-    safe_name = local.name.replace("'", "\\'")
+    use_version = _gdrive_version_xlsx_enabled() if version_xlsx is None else version_xlsx
+    drive_name = (
+        versioned_xlsx_upload_name(local.name)
+        if use_version and local.suffix.lower() == ".xlsx"
+        else local.name
+    )
+    if use_version and local.suffix.lower() == ".xlsx":
+        body = {"name": drive_name, "parents": [parent_id]}
+        created = (
+            service.files()
+            .create(body=body, media_body=media, fields="id", **_DRIVE_API_OPTS)
+            .execute()
+        )
+        return created["id"]
+
+    safe_name = drive_name.replace("'", "\\'")
     q = f"'{parent_id}' in parents and name = '{safe_name}' and trashed = false"
     existing = (
         service.files()
@@ -284,7 +332,7 @@ def _upload_file(service, MediaFileUpload, local: Path, parent_id: str) -> str:
         .get("files")
         or []
     )
-    body = {"name": local.name, "parents": [parent_id]}
+    body = {"name": drive_name, "parents": [parent_id]}
     if existing:
         fid = existing[0]["id"]
         service.files().update(fileId=fid, media_body=media, **_DRIVE_API_OPTS).execute()
@@ -299,8 +347,13 @@ def upload_files_flat(service, MediaFileUpload, local_dir: Path, drive_parent_id
     count = 0
     for p in sorted(local_dir.iterdir()):
         if p.is_file():
+            drive_name = (
+                versioned_xlsx_upload_name(p.name)
+                if _gdrive_version_xlsx_enabled() and p.suffix.lower() == ".xlsx"
+                else p.name
+            )
             _upload_file(service, MediaFileUpload, p, drive_parent_id)
-            print(f"  OK {p.name}")
+            print(f"  OK {drive_name}")
             count += 1
     return count
 
@@ -314,8 +367,13 @@ def upload_folder_named(
     count = 0
     for p in sorted(local_dir.iterdir()):
         if p.is_file():
+            uploaded_as = (
+                versioned_xlsx_upload_name(p.name)
+                if _gdrive_version_xlsx_enabled() and p.suffix.lower() == ".xlsx"
+                else p.name
+            )
             _upload_file(service, MediaFileUpload, p, sub_id)
-            print(f"  OK {drive_name}/{p.name}")
+            print(f"  OK {drive_name}/{uploaded_as}")
             count += 1
     return count
 

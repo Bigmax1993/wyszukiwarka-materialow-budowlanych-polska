@@ -12,7 +12,8 @@ Opcje:
 param(
     [switch]$SkipDiscovery,
     [switch]$SkipBackfill,
-    [switch]$ForceResend
+    [switch]$ForceResend,
+    [string]$DiscoveryRunId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,7 +51,18 @@ $sendFields = @{}
 if ($ForceResend) { $sendFields["force_resend"] = "true" }
 
 if (-not $SkipDiscovery) {
-    Invoke-GhaWorkflow "GU sobota discovery"
+    if ($DiscoveryRunId) {
+        Write-Host ""
+        Write-Host "=== GU sobota discovery (juz trwa: $DiscoveryRunId) ===" -ForegroundColor Cyan
+        Write-Host "URL: https://github.com/$Repo/actions/runs/$DiscoveryRunId"
+        gh run watch $DiscoveryRunId -R $Repo --exit-status
+        if ($LASTEXITCODE -ne 0) {
+            throw "Workflow GU sobota discovery nie powiodl sie (run $DiscoveryRunId)"
+        }
+        Write-Host "OK: GU sobota discovery" -ForegroundColor Green
+    } else {
+        Invoke-GhaWorkflow "GU sobota discovery"
+    }
     Invoke-GhaWorkflow "Sync wyniki Google Drive"
 }
 if (-not $SkipBackfill) {

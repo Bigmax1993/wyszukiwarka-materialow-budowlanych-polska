@@ -34,5 +34,13 @@ jobs:
       - name: Scraper smoke (--test)
         run: python de_gu_bauunternehmen_scraper.py --test
 
-      - name: Regresja discovery GU
-        run: python -m unittest tests.test_gu_discovery_regression tests.test_claude_llm_campaign -v
+      - name: Regresja discovery GU i Claude
+        run: |
+          python -m unittest \
+            tests.test_gu_discovery_regression \
+            tests.test_claude_llm_campaign \
+            tests.test_claude_contact_extract \
+            tests.test_claude_unlimited \
+            tests.test_website_full_crawl \
+            tests.test_claude_client_retry \
+            -v

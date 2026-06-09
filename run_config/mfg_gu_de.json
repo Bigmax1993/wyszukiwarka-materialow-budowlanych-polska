@@ -30,6 +30,7 @@
   "enable_auto_email": false,
   "enable_claude_discovery_terms": false,
   "enable_claude_page_verify": true,
+  "enable_claude_contact_extract": true,
   "enable_claude_row_cleanup": true,
   "claude_unlimited": true,
   "claude_discovery_max_rounds": 5,

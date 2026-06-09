@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 param(
-    [string]$DiscoveryRunId = "27129855434",
+    [Parameter(Mandatory = $true)]
+    [string]$DiscoveryRunId,
     [switch]$ForceResend
 )
 

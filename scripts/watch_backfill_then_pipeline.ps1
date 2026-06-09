@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 param(
-    [string]$BackfillRunId = "27134963915"
+    [Parameter(Mandatory = $true)]
+    [string]$BackfillRunId
 )
 
 $ErrorActionPreference = "Stop"

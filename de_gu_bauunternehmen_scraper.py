@@ -30,6 +30,8 @@ _paths = campaign_output_paths(_campaign, "de_gu_bauunternehmen")
 _DATA_ROOT = _paths["data_root"]
 
 from scraper_web_config import (
+    ENABLE_CLAUDE_PAGE_VERIFY,
+    ENABLE_CLAUDE_ROW_CLEANUP,
     ENABLE_GEMINI_CONTACT_EMAIL,
     ENABLE_GEMINI_ROW_CLEANUP,
     ENABLE_PLAYWRIGHT_COOKIE_CONSENT,
@@ -94,6 +96,8 @@ def apply_gu_run_config_extras(module, data: dict) -> None:
         "enable_gemini_page_verify",
         "enable_gemini_contact_extraction",
         "enable_gemini_row_cleanup",
+        "enable_claude_page_verify",
+        "enable_claude_row_cleanup",
         "require_generalunternehmer",
         "require_market_projects_in_portfolio",
         "require_website_references_or_portfolio",
@@ -113,6 +117,8 @@ def apply_gu_run_config_extras(module, data: dict) -> None:
         ("gemini_discovery_max_rounds", "GEMINI_DISCOVERY_MAX_ROUNDS"),
         ("gemini_discovery_terms_per_round", "GEMINI_DISCOVERY_TERMS_PER_ROUND"),
         ("serper_discovery_reserve", "SERPER_DISCOVERY_RESERVE"),
+        ("claude_daily_limit", "CLAUDE_DAILY_LIMIT"),
+        ("claude_discovery_reserve", "CLAUDE_DISCOVERY_RESERVE"),
         ("gemini_discovery_min_gain", "GEMINI_DISCOVERY_MIN_GAIN"),
         ("gemini_discovery_cache_days", "GEMINI_DISCOVERY_CACHE_DAYS"),
     )
@@ -122,6 +128,13 @@ def apply_gu_run_config_extras(module, data: dict) -> None:
                 setattr(module, attr, int(data[json_key]))
             except (TypeError, ValueError):
                 pass
+    if "claude_daily_limit" in data or "claude_discovery_reserve" in data:
+        from claude_client import configure_claude_limits
+
+        configure_claude_limits(
+            daily_limit=data.get("claude_daily_limit"),
+            reserve=data.get("claude_discovery_reserve"),
+        )
 
 
 import csv
@@ -148,6 +161,7 @@ from scraper_env import (
     ENV_GMAIL_APP_PASSWORD,
     ENV_GMAIL_SENDER_NAME,
     ENV_GMAIL_USER,
+    get_anthropic_api_key,
     get_env_value,
     get_google_ai_studio_api_key,
     get_serper_api_key,
@@ -249,7 +263,7 @@ SERPER_PLACES_API_URL = "https://google.serper.dev/places"
 SERPER_COUNTRY = "de"
 SERPER_LANGUAGE = "de"
 SERPER_TIMEOUT = 20
-SERPER_DAILY_LIMIT = 1900
+SERPER_DAILY_LIMIT = 3000
 _serper_limit_env = (os.environ.get("SERPER_DAILY_LIMIT") or "").strip()
 if _serper_limit_env:
     try:
@@ -461,7 +475,32 @@ ENABLE_GEMINI_PAGE_VERIFY = False
 ENABLE_GEMINI_DISCOVERY_TERMS = False
 GEMINI_DISCOVERY_MAX_ROUNDS = 3
 GEMINI_DISCOVERY_TERMS_PER_ROUND = 8
-SERPER_DISCOVERY_RESERVE = 50
+SERPER_DISCOVERY_RESERVE = 1000
+CLAUDE_DAILY_LIMIT = 3000
+CLAUDE_DISCOVERY_RESERVE = 1000
+_claude_limit_env = (os.environ.get("CLAUDE_DAILY_LIMIT") or "").strip()
+if _claude_limit_env:
+    try:
+        CLAUDE_DAILY_LIMIT = int(_claude_limit_env)
+    except ValueError:
+        pass
+_claude_reserve_env = (os.environ.get("CLAUDE_DISCOVERY_RESERVE") or "").strip()
+if _claude_reserve_env:
+    try:
+        CLAUDE_DISCOVERY_RESERVE = int(_claude_reserve_env)
+    except ValueError:
+        pass
+
+def _sync_claude_limits_from_module() -> None:
+    from claude_client import configure_claude_limits
+
+    configure_claude_limits(
+        daily_limit=CLAUDE_DAILY_LIMIT,
+        reserve=CLAUDE_DISCOVERY_RESERVE,
+    )
+
+
+_sync_claude_limits_from_module()
 GEMINI_DISCOVERY_MIN_GAIN = 1
 GEMINI_DISCOVERY_CACHE_DAYS = 7
 MAX_PAGES_FOR_RETAIL_VERIFICATION = 8
@@ -893,13 +932,14 @@ def save_excel(rows, path: Path, logger: logging.Logger, cache=None) -> None:
         if (
             logger is not None
             and cache is not None
-            and ENABLE_GEMINI_ROW_CLEANUP
+            and is_row_llm_cleanup_enabled()
         ):
+            label = "Claude" if ENABLE_CLAUDE_ROW_CLEANUP else "Gemini"
             console_step(
-                f"Gemini: Bereinigung vor Excel ({len(rows)} Zeilen)…"
+                f"{label}: Bereinigung vor Excel ({len(rows)} Zeilen)…"
             )
             rows_for_excel = [
-                enrich_row_with_gemini_cleanup(dict(r), logger, cache)
+                enrich_row_with_llm_cleanup(dict(r), logger, cache)
                 for r in rows
             ]
         export_rows = build_export_rows(
@@ -1387,6 +1427,93 @@ def apply_gemini_enrichment_to_row(row: dict, gemini_result: dict) -> None:
     row["bundesland"] = gemini_result.get("bundesland", row.get("bundesland", ""))
 
 
+def is_row_llm_cleanup_enabled() -> bool:
+    return bool(ENABLE_CLAUDE_ROW_CLEANUP or ENABLE_GEMINI_ROW_CLEANUP)
+
+
+def enrich_row_with_llm_cleanup(
+    row: dict, logger: logging.Logger, cache: dict
+) -> dict:
+    if ENABLE_CLAUDE_ROW_CLEANUP:
+        return enrich_row_with_claude_cleanup(row, logger, cache)
+    return enrich_row_with_gemini_cleanup(row, logger, cache)
+
+
+def enrich_row_with_claude_cleanup(row: dict, logger: logging.Logger, cache: dict) -> dict:
+    claude_cache = cache.setdefault("claude_row_enrichment", {})
+    cache_key = (
+        (row.get("url") or "").strip()
+        or f"{(row.get('nazwa') or '').strip()}|{(row.get('www') or '').strip()}"
+    )
+    address = sanitize_special_text(row.get("full_address") or row.get("adres") or "")
+    phone = sanitize_special_text(row.get("phones_found") or row.get("telefon") or "")
+    email = (row.get("email_target") or "").strip()
+    website = sanitize_special_text(row.get("official_website") or row.get("www") or "")
+    company = sanitize_special_text(
+        row.get("company_name_clean") or row.get("nazwa") or row.get("company_name_raw") or ""
+    )
+    if cache_key and cache_key in claude_cache:
+        apply_gemini_enrichment_to_row(row, claude_cache[cache_key])
+        return row
+
+    row["company_name_clean"] = company
+    row["nazwa"] = company
+    row["adres"] = address
+    row["telefon"] = phone
+    row["official_website"] = website
+
+    if not ENABLE_CLAUDE_ROW_CLEANUP:
+        row["bundesland"] = extract_bundesland(row)
+        return row
+
+    api_key = get_anthropic_api_key()
+    from claude_row_cleanup import claude_cleanup_row_fields
+
+    if not api_key:
+        fallback = gemini_fallback_enrichment(row, company, address, phone, email, website)
+        apply_gemini_enrichment_to_row(row, fallback)
+        if cache_key:
+            claude_cache[cache_key] = fallback
+        return row
+
+    states = ", ".join(GERMAN_STATES)
+    prompt = build_gemini_row_cleanup_prompt(
+        company=company,
+        address=address,
+        phone=phone,
+        email=email,
+        website=website,
+        states=states,
+    )
+    parsed = claude_cleanup_row_fields(prompt, logger, cache)
+    if not parsed:
+        fallback = gemini_fallback_enrichment(row, company, address, phone, email, website)
+        apply_gemini_enrichment_to_row(row, fallback)
+        if cache_key:
+            claude_cache[cache_key] = fallback
+        return row
+
+    cleaned_name = finalize_company_name_for_export(
+        parsed.get("company_name_clean", ""),
+        fallback_raw=company,
+        website=website,
+        email=email,
+    )
+    claude_result = {
+        "company_name_clean": cleaned_name,
+        "address": sanitize_special_text(parsed.get("address", address)) or address,
+        "phone": sanitize_special_text(parsed.get("phone", phone)) or phone,
+        "website": sanitize_special_text(parsed.get("website", website)) or website,
+        "bundesland": sanitize_special_text(parsed.get("bundesland", "")),
+    }
+    if claude_result["bundesland"] not in GERMAN_STATES:
+        claude_result["bundesland"] = extract_bundesland(row)
+    apply_gemini_enrichment_to_row(row, claude_result)
+    if cache_key:
+        claude_cache[cache_key] = claude_result
+    return row
+
+
 def enrich_row_with_gemini_cleanup(row: dict, logger: logging.Logger, cache: dict) -> dict:
     gemini_cache = cache.setdefault("gemini_row_enrichment", {})
     cache_key = (
@@ -1570,7 +1697,7 @@ def build_export_rows(rows, logger=None, cache=None):
                     found_list,
                     row.get("official_website") or row.get("www") or "",
                 )
-        if not ENABLE_GEMINI_ROW_CLEANUP:
+        if not is_row_llm_cleanup_enabled():
             row["adres"] = sanitize_special_text(
                 row.get("full_address") or row.get("adres") or ""
             )
@@ -2587,7 +2714,7 @@ def is_serper_limit_reached_today(cache: dict) -> bool:
     flags = cache.setdefault("serper_limit_reached", {})
     if flags.get(today):
         return True
-    if remaining <= 0:
+    if remaining <= SERPER_DISCOVERY_RESERVE:
         flags[today] = True
         return True
     return False
@@ -3261,6 +3388,47 @@ def verify_company_on_website(
             blob,
         )
 
+    if ENABLE_CLAUDE_PAGE_VERIFY:
+        from claude_client import is_claude_limit_reached_today, is_claude_rate_limited
+        from claude_page_verify import claude_verify_company_page
+
+        if (
+            get_anthropic_api_key()
+            and not is_claude_rate_limited(cache)
+            and not is_claude_limit_reached_today(cache)
+        ):
+            claude = claude_verify_company_page(
+                company_name,
+                website,
+                page_text,
+                logger,
+                cache,
+                cache_key=cache_key or website,
+                serper_blob=serper_blob,
+                require_generalunternehmer=REQUIRE_GENERALUNTERNEHMER,
+            )
+            if claude is not None:
+                small_hint = any(m in blob.lower() for m in SMALL_COMPANY_PAGE_MARKERS)
+                is_small = resolve_is_small_firm(
+                    blob, large=large, small_hint=small_hint
+                )
+                return _finalize_verification_result(
+                    {
+                        "verified": claude.get("verified", False),
+                        "is_small_firm": is_small,
+                        "retail_chains": claude.get("retail_chains") or [],
+                        "verification_reason": claude.get(
+                            "verification_reason", "claude"
+                        ),
+                        "verification_method": "claude_profile",
+                        "pages_checked": pages_checked,
+                        "page_snippet": _truncate_page_snippet(page_text),
+                        "is_gu": claude.get("is_gu", False),
+                        "gu_marker": claude.get("gu_marker", ""),
+                    },
+                    blob,
+                )
+
     if ENABLE_GEMINI_PAGE_VERIFY:
         from gemini_page_verify import gemini_verify_company_page
 
@@ -3690,8 +3858,11 @@ def _normalize_href_phone(raw: str) -> str:
     return normalize_phone_contact((raw or "").replace("tel:", "", 1))
 
 
+CONTACT_EMAIL_TOKEN_MAX = 40
 _PAGE_EMAIL_RE = re.compile(
-    r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,24}",
+    rf"[a-z0-9._%+\-]{{1,{CONTACT_EMAIL_TOKEN_MAX}}}@"
+    rf"[a-z0-9.\-]{{1,{CONTACT_EMAIL_TOKEN_MAX}}}\."
+    rf"[a-z0-9\-]{{2,{CONTACT_EMAIL_TOKEN_MAX}}}",
     re.IGNORECASE,
 )
 _PHONE_TEXT_RE = re.compile(
@@ -4063,7 +4234,7 @@ def search_official_website_with_serper(company_name: str, address: str, logger:
         serper_cache[query] = ""
         return ""
     today, used_today, remaining = get_remaining_daily_serper_limit(cache)
-    if remaining <= 0:
+    if remaining <= SERPER_DISCOVERY_RESERVE:
         mark_serper_limit_reached_today(cache)
         serper_cache[query] = ""
         return ""
@@ -5758,7 +5929,19 @@ def _process_serper_terms(
             existing = by_url.get(url) or (by_domain.get(dom) if dom else None)
             if existing and not DISCOVERY_IGNORE_CONTACT_CACHE and url in seen_global:
                 continue
-            if serper_only:
+            if serper_only and ENABLE_CLAUDE_PAGE_VERIFY:
+                r = enrich_row_with_contacts(r, cache, logger)
+                if not r.get("retail_verified"):
+                    reason = (r.get("verification_reason") or "claude_rejected").strip()
+                    console_step(
+                        f"Claude: odrzucono ({reason}): {r.get('nazwa', '')}"
+                    )
+                    if funnel is not None:
+                        funnel["rejected_claude_verify"] = (
+                            funnel.get("rejected_claude_verify", 0) + 1
+                        )
+                    continue
+            elif serper_only:
                 r["retail_verified"] = False
                 r["verification_reason"] = PENDING_WWW_VERIFY_REASON
                 r["email_target"] = ""
@@ -5812,7 +5995,9 @@ def _process_serper_terms(
             if enable_auto_email and r.get("email_target"):
                 r["email_status"] = "queued"
                 contacts_cache.setdefault(url, {})["email_status"] = "queued"
-            if serper_only:
+            if serper_only and not (
+                ENABLE_CLAUDE_PAGE_VERIFY and r.get("retail_verified")
+            ):
                 snippet_text = (
                     r.get("page_snippet")
                     or r.get("full_address")
@@ -6333,8 +6518,11 @@ def _run_smoke_tests() -> None:
     assert parsed_contacts["phones"]
     assert "GmbH" in parsed_contacts["company_name"]
     assert ENABLE_GEMINI_CONTACT_EXTRACTION is False
-    assert ENABLE_GEMINI_ROW_CLEANUP is True
+    assert ENABLE_CLAUDE_PAGE_VERIFY is True
+    assert ENABLE_CLAUDE_ROW_CLEANUP is True
+    assert ENABLE_GEMINI_ROW_CLEANUP is False
     assert ENABLE_GEMINI_PAGE_VERIFY is False
+    assert CONTACT_EMAIL_TOKEN_MAX == 40
     assert ENABLE_GEMINI_DISCOVERY_TERMS is False
     assert ENABLE_REGION_PLZ_FILTER is False
     assert len(SERPER_DISCOVERY_TERMS) >= 20

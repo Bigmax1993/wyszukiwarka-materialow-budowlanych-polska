@@ -67,6 +67,8 @@ ENV_GMAIL_SENDER_NAME = "GMAIL_SENDER_NAME"
 ENV_GEMINI_MODEL = "GEMINI_MODEL"
 ENV_GEMINI_MODELS = "GEMINI_MODELS"
 ENV_GEMINI_REQUEST_TIMEOUT = "GEMINI_REQUEST_TIMEOUT"
+ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
+ENV_CLAUDE_MODEL = "CLAUDE_MODEL"
 ENV_USE_GEMINI_REPLY_INTELLIGENCE = "USE_GEMINI_REPLY_INTELLIGENCE"
 ENV_KANBUD_DATA_DIR = "KANBUD_DATA_DIR"
 
@@ -130,6 +132,10 @@ def get_google_ai_studio_api_key() -> str:
     return get_env_value(ENV_GOOGLE_AI_STUDIO_API_KEY)
 
 
+def get_anthropic_api_key() -> str:
+    return get_env_value(ENV_ANTHROPIC_API_KEY)
+
+
 def get_mail_user() -> str:
     return get_env_value(ENV_MAIL_USER) or get_env_value(ENV_GMAIL_USER)
 
@@ -170,6 +176,8 @@ def check_env_status() -> dict[str, bool]:
         ENV_GEMINI_MODEL,
         ENV_GEMINI_MODELS,
         ENV_GEMINI_REQUEST_TIMEOUT,
+        ENV_ANTHROPIC_API_KEY,
+        ENV_CLAUDE_MODEL,
     )
     return {n: bool(get_env_value(n)) for n in all_names}
 

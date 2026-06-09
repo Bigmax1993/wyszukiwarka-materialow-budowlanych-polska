@@ -408,7 +408,7 @@ def is_junk_scraped_email(email: str) -> bool:
     if any(m in low for m in ("@a:", "@a.", ".rocket", ".lazy", "unpkg.com")):
         return True
     tld = domain.rsplit(".", 1)[-1]
-    if len(tld) > 15 or not re.match(r"^[a-z]{2,24}$", tld):
+    if len(tld) > 40 or not re.match(r"^[a-z0-9\-]{2,40}$", tld):
         return True
     if len(local) <= 2 and (len(tld) > 12 or tld in ("akzeptieren", "ablehnen")):
         return True

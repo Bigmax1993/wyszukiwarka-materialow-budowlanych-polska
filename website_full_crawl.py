@@ -143,14 +143,22 @@ def extract_all_internal_links(
     return out
 
 
-def format_crawl_text_for_claude(result: WebsiteCrawlResult) -> str:
-    parts: list[str] = []
-    for url in result.urls_visited:
-        page = result.pages.get(url) or {}
-        text = (page.get("page_text") or "").strip()
-        if text:
-            parts.append(f"=== {url} ===\n{text}")
-    return "\n\n".join(parts)
+def format_crawl_text_for_claude(
+    result: WebsiteCrawlResult,
+    *,
+    purpose: str = "verify",
+    per_section_max_chars: int | None = None,
+) -> str:
+    from claude_page_text import (
+        CRAWL_SECTION_MAX_CHARS,
+        format_crawl_text_for_claude as _format_for_claude,
+    )
+
+    return _format_for_claude(
+        result,
+        purpose=purpose,
+        per_section_max_chars=per_section_max_chars or CRAWL_SECTION_MAX_CHARS,
+    )
 
 
 def crawl_entire_website(

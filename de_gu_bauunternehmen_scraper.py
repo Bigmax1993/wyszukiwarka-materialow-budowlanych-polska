@@ -3195,8 +3195,10 @@ def _crawl_website_for_company(
     return result, format_crawl_text_for_claude(result)
 
 
-def _get_website_crawl_text(website: str, cache: dict | None) -> str:
-    """Tekst pełnego crawla domeny (dla Claude contact extract)."""
+def _get_website_crawl_text(
+    website: str, cache: dict | None, *, purpose: str = "verify"
+) -> str:
+    """Tekst pełnego crawla domeny (dla Claude verify / contact extract)."""
     from website_full_crawl import WebsiteCrawlResult, format_crawl_text_for_claude
 
     site = normalize_website(website)
@@ -3204,7 +3206,7 @@ def _get_website_crawl_text(website: str, cache: dict | None) -> str:
         return ""
     crawl = ((cache or {}).get("website_crawl") or {}).get(site)
     if isinstance(crawl, WebsiteCrawlResult):
-        return format_crawl_text_for_claude(crawl)
+        return format_crawl_text_for_claude(crawl, purpose=purpose)
     return ""
 
 
@@ -5598,9 +5600,9 @@ def enrich_row_with_contacts(
         and ENABLE_CLAUDE_CONTACT_EXTRACT
         and website
     ):
-        crawl_text = _get_website_crawl_text(website, cache) or collected.get(
-            "page_snippet"
-        ) or ""
+        crawl_text = _get_website_crawl_text(
+            website, cache, purpose="contact"
+        ) or collected.get("page_snippet") or ""
         if crawl_text.strip():
             from claude_contact_extract import (
                 claude_extract_contacts_from_pages,

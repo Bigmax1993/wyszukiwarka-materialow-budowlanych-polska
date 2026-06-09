@@ -18,7 +18,7 @@ from campaign_keyword_profile import (
 )
 
 _REQUIRED_CHAINS = "aldi, rewe, edeka, lidl, netto, penny, kaufland"
-PAGE_VERIFY_MAX_CHARS = 12000
+PAGE_VERIFY_MAX_CHARS = 18000
 CONTACT_EXTRACT_MAX_CHARS = 16000
 _CONTACT_EXTRACT_TEXT_PRIORITY = (
     "impressum",
@@ -106,8 +106,26 @@ def build_page_verify_prompt(
     page_text: str,
     *,
     max_chars: int = PAGE_VERIFY_MAX_CHARS,
+    serper_blob: str = "",
+    pages_crawled: int = 0,
 ) -> str:
-    snippet = prioritize_page_text_for_verify(page_text or "", max_chars=max_chars)
+    from claude_page_text import (
+        build_automatic_evidence_excerpt,
+        build_claude_context_header,
+        extract_crawl_section_urls,
+    )
+
+    raw = page_text or ""
+    priority_urls = extract_crawl_section_urls(raw)
+    header = build_claude_context_header(
+        company_name,
+        website,
+        serper_blob=serper_blob,
+        pages_crawled=pages_crawled or max(raw.count("=== http"), 1 if raw else 0),
+        priority_urls=priority_urls,
+    )
+    evidence = build_automatic_evidence_excerpt(raw)
+    snippet = prioritize_page_text_for_verify(raw, max_chars=max_chars)
     gu_kw = ", ".join(gu_required_keywords_sample())
     retail_kw = ", ".join(retail_context_keywords_sample())
     chain_kw = ", ".join(retail_chain_keywords_sample())
@@ -222,11 +240,13 @@ REGELN
 • primary_role: Generalunternehmer, Bauunternehmen, Filialbauer, Betreiber, Medienportal, …
 • reason: max. 2 Sätze — welcher Projektnachweis (oder warum abgelehnt)
 
-EINGABE
-Firma: {company_name}
-Webseite: {website}
+KONTEXT
+{header}
 
-AUSZUG
+AUTOMATISCHE DOWODY (Vorauswahl aus Crawl)
+{evidence}
+
+WEBSITE-AUSZUG (alle Unterseiten, === URL ===)
 {snippet or "(leer)"}
 """
 
@@ -303,8 +323,17 @@ def build_contact_extract_prompt(
     website: str,
     page_text: str,
 ) -> str:
+    from claude_page_text import build_claude_context_header, extract_crawl_section_urls
+
+    raw = page_text or ""
+    header = build_claude_context_header(
+        company_name,
+        website,
+        pages_crawled=max(raw.count("=== http"), 1 if raw else 0),
+        priority_urls=extract_crawl_section_urls(raw),
+    )
     snippet = prioritize_page_text_for_verify(
-        page_text,
+        raw,
         max_chars=CONTACT_EXTRACT_MAX_CHARS,
         priority_keywords=_CONTACT_EXTRACT_TEXT_PRIORITY,
     )
@@ -312,9 +341,8 @@ def build_contact_extract_prompt(
 Du bist Kontakt-Rechercheur für B2B-Outreach an kleine Generalunternehmer in Deutschland.
 Deine einzige Aufgabe: E-Mail-Adressen und Telefonnummern aus dem Website-Auszug finden.
 
-ZIEL
-Firma: {company_name}
-Webseite: {website}
+KONTEXT
+{header}
 
 REGELN (streng)
 • Nur Daten extrahieren, die WÖRTLICH im Auszug stehen — nichts erfinden, nichts raten.

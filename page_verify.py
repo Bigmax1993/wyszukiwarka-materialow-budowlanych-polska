@@ -47,9 +47,16 @@ def build_page_verify_prompt(
     page_text: str,
     *,
     max_chars: int = 8000,
+    serper_blob: str = "",
+    pages_crawled: int = 0,
 ) -> str:
     return _build_page_verify_prompt(
-        company_name, website, page_text, max_chars=max_chars
+        company_name,
+        website,
+        page_text,
+        max_chars=max_chars,
+        serper_blob=serper_blob,
+        pages_crawled=pages_crawled,
     )
 
 

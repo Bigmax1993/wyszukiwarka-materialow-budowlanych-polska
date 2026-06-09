@@ -55,7 +55,14 @@ def claude_verify_company_page(
             verify_cache[cache_key] = out
         return out
 
-    prompt = build_page_verify_prompt(company_name, website, page_text)
+    pages_crawled = (page_text or "").count("=== http")
+    prompt = build_page_verify_prompt(
+        company_name,
+        website,
+        page_text,
+        serper_blob=serper_blob,
+        pages_crawled=pages_crawled,
+    )
     try:
         text, model = claude_generate_text(
             prompt, logger, api_key, cache=cache, on_step=on_step

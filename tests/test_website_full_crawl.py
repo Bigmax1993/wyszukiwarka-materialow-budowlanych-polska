@@ -10,10 +10,15 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import json
+
 from website_full_crawl import (
+    WebsiteCrawlResult,
     crawl_entire_website,
     extract_all_internal_links,
     format_crawl_text_for_claude,
+    website_crawl_result_from_dict,
+    website_crawl_result_to_dict,
 )
 
 
@@ -77,6 +82,21 @@ class WebsiteFullCrawlTest(unittest.TestCase):
         text = format_crawl_text_for_claude(result)
         self.assertIn("=== https://example.de/karriere", text)
         self.assertIn("Netto", text)
+
+    def test_crawl_result_json_roundtrip(self):
+        original = WebsiteCrawlResult(
+            pages={"https://firma.de/impressum": {"emails": ["info@firma.de"]}},
+            urls_visited=["https://firma.de/impressum"],
+            urls_skipped=["https://firma.de/feed"],
+            capped=True,
+        )
+        payload = {"website_crawl": {"https://firma.de": website_crawl_result_to_dict(original)}}
+        raw = json.dumps(payload)
+        loaded = json.loads(raw)
+        restored = website_crawl_result_from_dict(loaded["website_crawl"]["https://firma.de"])
+        self.assertEqual(restored.urls_visited, original.urls_visited)
+        self.assertEqual(restored.pages, original.pages)
+        self.assertTrue(restored.capped)
 
 
 if __name__ == "__main__":

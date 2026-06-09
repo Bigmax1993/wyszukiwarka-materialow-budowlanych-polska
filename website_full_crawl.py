@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Callable
 from urllib.parse import urldefrag, urljoin, urlparse
 
@@ -66,6 +66,21 @@ class WebsiteCrawlResult:
     urls_visited: list[str] = field(default_factory=list)
     urls_skipped: list[str] = field(default_factory=list)
     capped: bool = False
+
+
+def website_crawl_result_to_dict(result: WebsiteCrawlResult) -> dict:
+    return asdict(result)
+
+
+def website_crawl_result_from_dict(data: dict) -> WebsiteCrawlResult:
+    if not isinstance(data, dict):
+        return WebsiteCrawlResult()
+    return WebsiteCrawlResult(
+        pages=dict(data.get("pages") or {}),
+        urls_visited=list(data.get("urls_visited") or []),
+        urls_skipped=list(data.get("urls_skipped") or []),
+        capped=bool(data.get("capped")),
+    )
 
 
 def _normalize_crawl_url(

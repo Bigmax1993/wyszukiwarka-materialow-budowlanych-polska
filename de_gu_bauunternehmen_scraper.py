@@ -1821,7 +1821,41 @@ def _empty_cache() -> dict:
         "serper_api_exhausted": {},
         "claude_discovery_terms": {},
         "claude_page_verify": {},
+        "website_crawl": {},
     }
+
+
+def _prepare_cache_for_json(cache: dict) -> dict:
+    """Konwersja WebsiteCrawlResult → dict przed json.dump."""
+    from website_full_crawl import WebsiteCrawlResult, website_crawl_result_to_dict
+
+    payload = dict(cache)
+    wc = payload.get("website_crawl")
+    if isinstance(wc, dict):
+        payload["website_crawl"] = {
+            site: (
+                website_crawl_result_to_dict(val)
+                if isinstance(val, WebsiteCrawlResult)
+                else val
+            )
+            for site, val in wc.items()
+        }
+    return payload
+
+
+def _hydrate_website_crawl_cache(cache: dict) -> None:
+    """Po json.load: dict → WebsiteCrawlResult w website_crawl."""
+    from website_full_crawl import WebsiteCrawlResult, website_crawl_result_from_dict
+
+    wc = cache.get("website_crawl")
+    if not isinstance(wc, dict):
+        cache["website_crawl"] = {}
+        return
+    for site, val in list(wc.items()):
+        if isinstance(val, WebsiteCrawlResult):
+            continue
+        if isinstance(val, dict) and "pages" in val:
+            wc[site] = website_crawl_result_from_dict(val)
 
 
 def reset_pipeline_cache() -> dict:
@@ -1976,9 +2010,11 @@ def load_cache(logger: logging.Logger) -> dict:
             "claude_contact_extract",
             "claude_discovery_terms",
             "claude_page_verify",
+            "website_crawl",
         ):
             if k not in cache:
                 cache[k] = {}
+        _hydrate_website_crawl_cache(cache)
         # Legacy migration (read-only fallback buckets from Gemini naming).
         if (
             not cache.get("claude_row_enrichment")
@@ -2103,7 +2139,7 @@ def save_cache(cache: dict, logger: logging.Logger) -> None:
         if ENABLE_CACHE_PURGE_INSTITUTIONS:
             purge_institutions_from_cache(cache, logger)
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
+            json.dump(_prepare_cache_for_json(cache), f, ensure_ascii=False, indent=2)
         logger.info(
             "Cache gespeichert: "
             f"places={len(cache.get('places', {}))}, "
@@ -5035,6 +5071,8 @@ def resolve_inquiry_email_target(
     cache: dict | None,
     *,
     cache_key: str = "",
+    retail_verified: bool = False,
+    verification_text: str = "",
 ) -> tuple[str, int, str]:
     """
     Zwraca (email_target, score, metoda).
@@ -5045,13 +5083,19 @@ def resolve_inquiry_email_target(
         list(collected.get("impressum_emails") or [])
     )
     site = collected.get("website") or website or ""
-    snippet = collected.get("page_snippet") or ""
+    snippet = " ".join(
+        x for x in (collected.get("page_snippet") or "", verification_text or "") if x
+    ).strip()
 
     target, score, method = pick_email_with_impressum_priority(
         candidates, impressum_candidates, site
     )
-    if target and not is_valid_retail_store_builder_contact(
-        email=target, url=site, name=company_name, text=snippet
+    if (
+        target
+        and not retail_verified
+        and not is_valid_retail_store_builder_contact(
+            email=target, url=site, name=company_name, text=snippet
+        )
     ):
         log_email_pick_decision(
             logger,
@@ -5527,6 +5571,15 @@ def enrich_row_with_contacts(
     subject = ""
     body = ""
     mail_status = "not_sent"
+    verify_context = " ".join(
+        x
+        for x in (
+            verification.get("page_snippet") or "",
+            verification.get("verification_reason") or "",
+            " ".join(verification.get("retail_chains") or []),
+        )
+        if x
+    ).strip()
     target_email, email_score, email_pick_method = resolve_inquiry_email_target(
         collected,
         website or "",
@@ -5534,6 +5587,8 @@ def enrich_row_with_contacts(
         logger,
         cache,
         cache_key=place_url,
+        retail_verified=bool(row.get("retail_verified")),
+        verification_text=verify_context,
     )
     if (
         not target_email
@@ -5572,6 +5627,8 @@ def enrich_row_with_contacts(
                         logger,
                         cache,
                         cache_key=place_url,
+                        retail_verified=bool(row.get("retail_verified")),
+                        verification_text=verify_context,
                     )
                 )
                 if target_email:

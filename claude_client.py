@@ -17,6 +17,8 @@ ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 CLAUDE_REQUEST_TIMEOUT = 120
 CLAUDE_MIN_INTERVAL_SECONDS = 1.2
+CLAUDE_API_RETRY_ATTEMPTS = 3
+CLAUDE_API_RETRY_WAIT_SECONDS = 20
 CLAUDE_DAILY_LIMIT = 3000
 CLAUDE_DISCOVERY_RESERVE = 1000
 
@@ -100,6 +102,11 @@ def _is_rate_limit_error(err: Exception) -> bool:
     return resp is not None and getattr(resp, "status_code", None) == 429
 
 
+def _should_retry_claude_api_call(err: Exception) -> bool:
+    """Ponów przy błędzie HTTP/sieci (nie przy braku klucza / limicie dziennym)."""
+    return isinstance(err, requests.RequestException)
+
+
 def claude_generate_text(
     prompt: str,
     logger: logging.Logger,
@@ -125,7 +132,6 @@ def claude_generate_text(
         )
 
     model = get_claude_model()
-    wait_for_claude_slot(cache)
     headers = {
         "x-api-key": key,
         "anthropic-version": ANTHROPIC_VERSION,
@@ -136,22 +142,41 @@ def claude_generate_text(
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
-    try:
-        resp = requests.post(
-            ANTHROPIC_MESSAGES_URL,
-            headers=headers,
-            json=payload,
-            timeout=CLAUDE_REQUEST_TIMEOUT,
-        )
-        if resp.status_code == 429:
-            mark_claude_rate_limited(cache, logger)
+    data: dict | None = None
+    last_exc: Exception | None = None
+    for attempt in range(1, CLAUDE_API_RETRY_ATTEMPTS + 1):
+        try:
+            wait_for_claude_slot(cache)
+            resp = requests.post(
+                ANTHROPIC_MESSAGES_URL,
+                headers=headers,
+                json=payload,
+                timeout=CLAUDE_REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 429:
+                mark_claude_rate_limited(cache, logger)
             resp.raise_for_status()
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as exc:
-        if _is_rate_limit_error(exc):
-            mark_claude_rate_limited(cache, logger)
-        raise
+            data = resp.json()
+            break
+        except Exception as exc:
+            last_exc = exc
+            if _is_rate_limit_error(exc):
+                mark_claude_rate_limited(cache, logger)
+            if (
+                attempt >= CLAUDE_API_RETRY_ATTEMPTS
+                or not _should_retry_claude_api_call(exc)
+            ):
+                raise
+            logger.warning(
+                "Claude API: błąd (próba %s/%s): %s — ponowienie za %ss",
+                attempt,
+                CLAUDE_API_RETRY_ATTEMPTS,
+                exc,
+                CLAUDE_API_RETRY_WAIT_SECONDS,
+            )
+            time.sleep(CLAUDE_API_RETRY_WAIT_SECONDS)
+    if data is None:
+        raise last_exc or RuntimeError("Claude API: brak odpowiedzi po ponowieniach")
 
     if not bypass_daily_limit:
         increase_daily_claude_counter(cache, 1)

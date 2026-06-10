@@ -29,7 +29,8 @@ LEGACY_ATTACHMENT_PATH = Path(
     r"C:\Users\kanbu\Documents\Prezentacja\MFG_Moderner Fliesenboden.pptx"
 )
 
-DRIVE_READONLY_SCOPES = ("https://www.googleapis.com/auth/drive.readonly",)
+# Ten sam scope co przy gdrive_oauth_setup.py (refresh token na GHA).
+DRIVE_READONLY_SCOPES = ("https://www.googleapis.com/auth/drive",)
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 

@@ -6207,12 +6207,21 @@ def run_scraper(
                         )
 
         if enable_auto_email:
-            reenrich_contacts_for_mailing(
-                all_rows,
-                cache,
-                logger,
-                refresh_all=force_resend,
+            rows_with_email = sum(
+                1 for r in all_rows if (r.get("email_target") or "").strip()
             )
+            if discovery_mode == "emails_only" and rows_with_email:
+                console_step(
+                    f"Wysylka z Excela/cache: pomijam ponowny crawl www "
+                    f"({rows_with_email} wierszy z e-mailem)"
+                )
+            else:
+                reenrich_contacts_for_mailing(
+                    all_rows,
+                    cache,
+                    logger,
+                    refresh_all=force_resend,
+                )
             _process_email_jobs(
                 all_rows,
                 cache,

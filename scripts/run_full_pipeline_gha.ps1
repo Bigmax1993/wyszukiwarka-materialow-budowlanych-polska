@@ -13,7 +13,8 @@ param(
     [switch]$SkipDiscovery,
     [switch]$SkipBackfill,
     [switch]$ForceResend,
-    [string]$DiscoveryRunId = ""
+    [string]$DiscoveryRunId = "",
+    [string]$ResumeDiscoveryRunId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +61,8 @@ if (-not $SkipDiscovery) {
             throw "Workflow GU sobota discovery nie powiodl sie (run $DiscoveryRunId)"
         }
         Write-Host "OK: GU sobota discovery" -ForegroundColor Green
+    } elseif ($ResumeDiscoveryRunId) {
+        Invoke-GhaWorkflow "GU sobota discovery" @{ resume_artifact_run_id = $ResumeDiscoveryRunId }
     } else {
         Invoke-GhaWorkflow "GU sobota discovery"
     }

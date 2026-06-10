@@ -1749,6 +1749,14 @@ def row_from_excel_record(rec: dict) -> dict:
         row["is_gu"] = True
     elif gu_col == "nein":
         row["is_gu"] = False
+    small_col = str(rec.get("Kleinunternehmen") or "").strip().lower()
+    if small_col == "ja":
+        row["is_small_firm"] = True
+    elif small_col == "nein":
+        row["is_small_firm"] = False
+    chains = str(rec.get("Handelsketten") or "").strip()
+    if chains:
+        row["retail_chains_found"] = chains
     return row
 
 

@@ -3,7 +3,7 @@
 Stały załącznik PPTX do maili MFG (DE Ost + GU bundesweit).
 
 Źródło (Google Slides):
-  https://docs.google.com/presentation/d/1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl/edit
+  https://docs.google.com/presentation/d/1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe/edit
 
 Kolejność szukania pliku:
   1. MFG_EMAIL_ATTACHMENT_PATH (env)
@@ -18,7 +18,7 @@ import logging
 import os
 from pathlib import Path
 
-GOOGLE_SLIDES_PRESENTATION_ID = "1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl"
+GOOGLE_SLIDES_PRESENTATION_ID = "1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe"
 GOOGLE_SLIDES_URL = (
     "https://docs.google.com/presentation/d/"
     f"{GOOGLE_SLIDES_PRESENTATION_ID}/edit"
@@ -48,10 +48,52 @@ def _cache_attachment_path(campaign_dir: Path) -> Path:
     return wyniki_dir(root) / ATTACHMENT_FILENAME
 
 
-def _download_slides_pptx(dest: Path, logger: logging.Logger | None = None) -> bool:
-    """Eksport Google Slides → PPTX (konto usługi z dostępem do prezentacji)."""
+def _load_drive_readonly_credentials():
+    """OAuth (GHA) lub konto usługowe — do eksportu Slides → PPTX."""
+    refresh = (os.environ.get("GDRIVE_OAUTH_REFRESH_TOKEN") or "").strip()
+    client_id = (os.environ.get("GDRIVE_OAUTH_CLIENT_ID") or "").strip()
+    client_secret = (os.environ.get("GDRIVE_OAUTH_CLIENT_SECRET") or "").strip()
+    if refresh and client_id and client_secret:
+        try:
+            from google.auth.transport.requests import Request
+            from google.oauth2.credentials import Credentials
+        except ImportError:
+            return None
+        creds = Credentials(
+            token=None,
+            refresh_token=refresh,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=list(DRIVE_READONLY_SCOPES),
+        )
+        creds.refresh(Request())
+        return creds
+
+    import json
+
     try:
         from google.oauth2 import service_account
+    except ImportError:
+        return None
+
+    raw = (os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON") or "").strip()
+    path = (os.environ.get("GDRIVE_SERVICE_ACCOUNT_FILE") or "").strip()
+    if raw:
+        info = json.loads(raw)
+        return service_account.Credentials.from_service_account_info(
+            info, scopes=DRIVE_READONLY_SCOPES
+        )
+    if path and Path(path).is_file():
+        return service_account.Credentials.from_service_account_file(
+            path, scopes=DRIVE_READONLY_SCOPES
+        )
+    return None
+
+
+def _download_slides_pptx(dest: Path, logger: logging.Logger | None = None) -> bool:
+    """Eksport Google Slides → PPTX (OAuth lub konto usługi)."""
+    try:
         from googleapiclient.discovery import build
         from googleapiclient.http import MediaIoBaseDownload
     except ImportError:
@@ -59,34 +101,31 @@ def _download_slides_pptx(dest: Path, logger: logging.Logger | None = None) -> b
             logger.warning("Brak google-api-python-client — nie pobrano PPTX ze Slides.")
         return False
 
-    import json
-
-    raw = (os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON") or "").strip()
-    path = (os.environ.get("GDRIVE_SERVICE_ACCOUNT_FILE") or "").strip()
-    creds = None
-    if raw:
-        info = json.loads(raw)
-        creds = service_account.Credentials.from_service_account_info(
-            info, scopes=DRIVE_READONLY_SCOPES
-        )
-    elif path and Path(path).is_file():
-        creds = service_account.Credentials.from_service_account_file(
-            path, scopes=DRIVE_READONLY_SCOPES
-        )
+    creds = _load_drive_readonly_credentials()
     if creds is None:
         return False
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     service = build("drive", "v3", credentials=creds, cache_discovery=False)
-    request = service.files().export_media(
-        fileId=GOOGLE_SLIDES_PRESENTATION_ID,
-        mimeType=PPTX_MIME,
-    )
-    buffer = io.BytesIO()
-    downloader = MediaIoBaseDownload(buffer, request)
-    done = False
-    while not done:
-        _status, done = downloader.next_chunk()
+    try:
+        request = service.files().export_media(
+            fileId=GOOGLE_SLIDES_PRESENTATION_ID,
+            mimeType=PPTX_MIME,
+        )
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+        done = False
+        while not done:
+            _status, done = downloader.next_chunk()
+    except Exception as exc:
+        if logger:
+            logger.error(
+                "Eksport Slides %s nieudany (%s). Udostępnij prezentację kontu OAuth "
+                "lub konto usługi z GDRIVE_SERVICE_ACCOUNT_JSON.",
+                GOOGLE_SLIDES_PRESENTATION_ID,
+                exc,
+            )
+        return False
     dest.write_bytes(buffer.getvalue())
     if logger:
         logger.info(

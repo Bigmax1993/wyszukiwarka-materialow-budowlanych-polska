@@ -65,6 +65,15 @@ jobs:
           run-id: ${{ steps.artifact_run.outputs.run-id }}
           path: .
 
+      - name: Pobierz aktualny PPTX ze Slides
+        env:
+          GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
+          GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
+          GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
+        run: |
+          pip install -r requirements-drive.txt
+          python scripts/export_mfg_slides_attachment.py
+
       - name: Send emails partia 1 (do 300/dzien, okno 8-18 Berlin)
         env:
           MAIL_USER: ${{ secrets.MAIL_USER }}

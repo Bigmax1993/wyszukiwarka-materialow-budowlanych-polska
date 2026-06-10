@@ -122,7 +122,8 @@ Workflowy send ustawiają:
 
 
 
-Po zmianie prezentacji w [Google Slides](https://docs.google.com/presentation/d/1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl/edit) — pobierz PPTX i wgraj do repo w `assets/campaign/`.
+Przed wysyłką workflow **pobiera świeży PPTX** ze Slides (`scripts/export_mfg_slides_attachment.py`).  
+Źródło: [Google Slides MFG](https://docs.google.com/presentation/d/1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe/edit) (OAuth `GDRIVE_OAUTH_*` na GHA).
 
 
 

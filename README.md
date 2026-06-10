@@ -234,7 +234,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_pipeline_gha.ps1 -Forc
 
 - Treść: `mfg_gu_inquiry_email_de.py` (tylko niemiecki)
 
-- Załącznik: [Google Slides](https://docs.google.com/presentation/d/1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl/edit) → PPTX (`mfg_gu_email_attachment.py`)
+- Załącznik: [Google Slides](https://docs.google.com/presentation/d/1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe/edit) → PPTX (`mfg_gu_email_attachment.py`)
 
 - Na GitHub Actions: `assets/campaign/MFG_Referenzliste_Einzelhandel.pptx` (podmień po zmianie Slides)
 

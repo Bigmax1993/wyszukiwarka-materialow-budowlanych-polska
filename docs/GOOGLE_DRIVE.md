@@ -71,8 +71,8 @@ cd Wyszukiwarka-partnerow
 
 ## Załącznik PPTX (poniedziałek/wtorek, GitHub Actions)
 
-Prezentacja źródłowa: [Google Slides MFG](https://docs.google.com/presentation/d/1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl/edit)  
-ID: `1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl`
+Prezentacja źródłowa: [Google Slides MFG](https://docs.google.com/presentation/d/1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe/edit)  
+ID: `1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe`
 
 Na runnerze GitHub Actions workflowy send używają pliku z repo:
 

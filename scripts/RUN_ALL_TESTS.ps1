@@ -70,7 +70,7 @@ assert 'office@mfg-fliesen.de' not in [a.lower() for a in cc]
 Test-Step "mfg_gu_email_attachment (ID Slides)" {
     python -c @"
 from mfg_gu_email_attachment import GOOGLE_SLIDES_PRESENTATION_ID
-assert GOOGLE_SLIDES_PRESENTATION_ID == '1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl'
+assert GOOGLE_SLIDES_PRESENTATION_ID == '1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe'
 "@
 }
 

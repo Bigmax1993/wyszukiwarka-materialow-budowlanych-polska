@@ -6321,7 +6321,7 @@ def _run_smoke_tests() -> None:
     assert "Maksym Swinczak" in FIXED_GU_INQUIRY_DE
     assert FIXED_EMAIL_SUBJECT_DE.startswith("Kooperationsanfrage")
     assert choose_subject_variant("Test GmbH") == FIXED_EMAIL_SUBJECT_DE
-    assert GOOGLE_SLIDES_PRESENTATION_ID == "1Q66gIF_Y6R7r98NYzo2dtQy0Jr_K8mTl"
+    assert GOOGLE_SLIDES_PRESENTATION_ID == "1kBnp5x0pdgXZSPzVte9e92IUgn2A5gSe"
     _att = ensure_mfg_email_attachment(CAMPAIGN_DIR)
     if _att and _att.is_file():
         assert get_email_attachments_de_gu()[0].endswith(".pptx")

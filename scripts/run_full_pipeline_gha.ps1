@@ -51,17 +51,17 @@ function Invoke-GhaWorkflow {
 $sendFields = @{}
 if ($ForceResend) { $sendFields["force_resend"] = "true" }
 
-if (-not $SkipDiscovery) {
-    if ($DiscoveryRunId) {
-        Write-Host ""
-        Write-Host "=== GU sobota discovery (juz trwa: $DiscoveryRunId) ===" -ForegroundColor Cyan
-        Write-Host "URL: https://github.com/$Repo/actions/runs/$DiscoveryRunId"
-        gh run watch $DiscoveryRunId -R $Repo --exit-status
-        if ($LASTEXITCODE -ne 0) {
-            throw "Workflow GU sobota discovery nie powiodl sie (run $DiscoveryRunId)"
-        }
-        Write-Host "OK: GU sobota discovery" -ForegroundColor Green
-    } elseif ($ResumeDiscoveryRunId) {
+if ($DiscoveryRunId) {
+    Write-Host ""
+    Write-Host "=== GU sobota discovery (juz trwa: $DiscoveryRunId) ===" -ForegroundColor Cyan
+    Write-Host "URL: https://github.com/$Repo/actions/runs/$DiscoveryRunId"
+    gh run watch $DiscoveryRunId -R $Repo --exit-status
+    if ($LASTEXITCODE -ne 0) {
+        throw "Workflow GU sobota discovery nie powiodl sie (run $DiscoveryRunId)"
+    }
+    Write-Host "OK: GU sobota discovery" -ForegroundColor Green
+} elseif (-not $SkipDiscovery) {
+    if ($ResumeDiscoveryRunId) {
         Invoke-GhaWorkflow "GU sobota discovery" @{ resume_artifact_run_id = $ResumeDiscoveryRunId }
     } else {
         Invoke-GhaWorkflow "GU sobota discovery"

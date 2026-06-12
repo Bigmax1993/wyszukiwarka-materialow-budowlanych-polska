@@ -22,8 +22,13 @@ class ClaudeDiscoveryTermsTest(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertIn("Generalunternehmer", lines[0])
 
-    def test_validate_accepts_gu_term(self):
-        self.assertTrue(validate_discovery_term("Generalunternehmer Filialbau Hannover"))
+    def test_validate_accepts_gu_term_with_chain(self):
+        self.assertTrue(
+            validate_discovery_term("Generalunternehmer Filialbau Hannover Aldi markt")
+        )
+
+    def test_validate_rejects_gu_term_without_chain(self):
+        self.assertFalse(validate_discovery_term("Generalunternehmer Filialbau Hannover"))
 
     def test_validate_rejects_ladenbau_only(self):
         self.assertFalse(validate_discovery_term("Ladenbau Hannover GmbH"))
@@ -198,7 +203,10 @@ class PageVerifyTest(unittest.TestCase):
         }
         ok, reason, _ = apply_page_verdict(
             llm,
-            page_text="STRABAG SE — weltweit tätig, über 77.000 Mitarbeiter. Rewe Projekt.",
+            page_text=(
+                "STRABAG SE — weltweit tätig, über 77.000 Mitarbeiter. "
+                "Neubau Rewe Supermarkt Filialbau."
+            ),
             require_small_firm=True,
         )
         self.assertFalse(ok)

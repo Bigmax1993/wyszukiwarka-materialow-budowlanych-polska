@@ -65,6 +65,9 @@ class TestClaudePrompts(unittest.TestCase):
         )
         self.assertIn("Genau 5 Zeilen", p)
         self.assertIn("Generalunternehmer", p)
+        self.assertIn("aldi, rewe, edeka", p.lower())
+        self.assertIn("lidl", p.lower())
+        self.assertIn("rotieren", p.lower())
 
     def test_email_prompts_json_only(self):
         de = build_custom_email_prompt_de("Hallo", "Firma GmbH")

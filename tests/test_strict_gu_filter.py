@@ -20,7 +20,7 @@ class StrictGuFilterTest(unittest.TestCase):
     def test_required_chains_whitelist(self):
         self.assertEqual(
             set(REQUIRED_RETAIL_CHAIN_KEYWORDS),
-            {"aldi", "rewe", "edeka", "netto", "penny", "kaufland", "norma"},
+            {"aldi", "rewe", "edeka", "netto", "penny", "kaufland", "lidl", "norma"},
         )
 
     def test_store_shell_build_evidence(self):

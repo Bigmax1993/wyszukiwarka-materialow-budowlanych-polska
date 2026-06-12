@@ -110,13 +110,27 @@ jobs:
 
             echo "run-id=$RESUME" >> "$GITHUB_OUTPUT"
 
-            echo "artifact-name=de-gu-wyniki-wed" >> "$GITHUB_OUTPUT"
+            ART_NAMES=$(gh api "repos/${{ github.repository }}/actions/runs/${RESUME}/artifacts" --jq '.artifacts[].name' 2>/dev/null || true)
+
+            if echo "$ART_NAMES" | grep -qx "de-gu-wyniki-wed"; then
+
+              echo "artifact-name=de-gu-wyniki-wed" >> "$GITHUB_OUTPUT"
+
+            elif echo "$ART_NAMES" | grep -qx "de-gu-wyniki-pi"; then
+
+              echo "artifact-name=de-gu-wyniki-pi" >> "$GITHUB_OUTPUT"
+
+            else
+
+              echo "artifact-name=de-gu-wyniki-fri" >> "$GITHUB_OUTPUT"
+
+            fi
 
             echo "resume=1" >> "$GITHUB_OUTPUT"
 
             echo "continue=1" >> "$GITHUB_OUTPUT"
 
-            echo "Wznowienie discovery z run $RESUME"
+            echo "Wznowienie discovery z run $RESUME (artefakt: $(grep '^artifact-name=' "$GITHUB_OUTPUT" | tail -1))"
 
             exit 0
 

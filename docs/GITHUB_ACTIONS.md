@@ -41,7 +41,7 @@ Repozytorium: [Wyszukiwarka-partnerow](https://github.com/Bigmax1993/Wyszukiwark
 
 |-------|----------|----------|-----------|
 
-| **Piątek** | discovery część 1 | `0 15 * * 5` | **17:00** |
+| **Piątek** | discovery część 1 | `0 18 * * 5` | **20:00** |
 | **Sobota** | discovery część 2 | `10 18 * * 6` | **20:10** (pomijane gdy piątek wyczerpał Serper) |
 
 | **Niedziela** | backfill | `30 3 * * 0` | **05:30** |
@@ -56,7 +56,7 @@ Repozytorium: [Wyszukiwarka-partnerow](https://github.com/Bigmax1993/Wyszukiwark
 
 
 
-Zimą (CET): discovery `10 19 * * 6`, send 1 `0 11 * * 1`, sync Drive `0 5 * * 1`.
+Zimą (CET): piątek discovery `0 19 * * 5`, sobota `10 19 * * 6`, send 1 `0 11 * * 1`, sync Drive `0 5 * * 1`.
 
 
 

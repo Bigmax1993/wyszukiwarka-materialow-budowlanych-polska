@@ -22,6 +22,7 @@ REQUIRED_RETAIL_CHAIN_KEYWORDS = (
     "netto",
     "penny",
     "kaufland",
+    "lidl",
     "norma",
 )
 

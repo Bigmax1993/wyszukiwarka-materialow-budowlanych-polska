@@ -17,7 +17,7 @@ from campaign_keyword_profile import (
     small_company_markers_sample,
 )
 
-_REQUIRED_CHAINS = "aldi, rewe, edeka, netto, penny, kaufland, norma"
+_REQUIRED_CHAINS = "aldi, rewe, edeka, netto, penny, kaufland, lidl, norma"
 PAGE_VERIFY_MAX_CHARS = 18000
 CONTACT_EXTRACT_MAX_CHARS = 16000
 _CONTACT_EXTRACT_TEXT_PRIORITY = (
@@ -291,7 +291,7 @@ Unsicher → "".
 • website → https://firmendomain.tld (Root, keine Unterseite, kein Verzeichnis, kein PDF)
 • url → identisch zur Basis-URL (https://domain.tld)
 • bundesland → GENAU ein Wert aus: [{states}] — sonst ""
-• handelsketten → nur Kleinbuchstaben, kommagetrennt: rewe, aldi, edeka, netto, penny, kaufland, norma — oder ""
+• handelsketten → nur Kleinbuchstaben, kommagetrennt: rewe, aldi, edeka, netto, penny, kaufland, lidl, norma — oder ""
 • email_nur_info: NICHT in JSON übernehmen — nur zur Plausibilitätsprüfung
 
 NEGATIV-BEISPIELE (alles → leere Felder oder Name "")
@@ -386,6 +386,7 @@ VORLAGEN (Varianten, {{city}} durch echte Stadt ersetzen)
 
 PFLICHT pro Zeile
 • Mindestens ein GU-Marker: {gu_kw}
+• Mindestens eine Handelskette WÖRTLICH: {_REQUIRED_CHAINS} (rotieren — nicht immer Aldi)
 • Retail/Filialbau-Kontext erwünscht: {retail_kw}
 • Max {max_term_len} Zeichen
 • Deutsch, keine Nummerierung, keine Anführungszeichen, keine leeren Zeilen
@@ -397,9 +398,9 @@ VERBOTEN
 {exclude_block}
 
 GUTE BEISPIELE
-Generalunternehmer Filialbau Hannover
+Generalunternehmer Filialbau Hannover Aldi markt
 GU Supermarktbau Rewe Neubau Braunschweig
-Generalunternehmer Aldi Neubau {city_str.split(",")[0].strip() if city_str else "Leipzig"}
+Generalunternehmer Filialbau {city_str.split(",")[0].strip() if city_str else "Leipzig"} Netto markt
 
 SCHLECHTE BEISPIELE
 Bauunternehmen Gewerbebau Hannover

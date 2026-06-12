@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from claude_prompts import build_discovery_terms_prompt as _build_discovery_terms_prompt
 from claude_client import claude_generate_text
-from de_gu_keywords import BUNDESLAND_CONFIG
+from de_gu_keywords import BUNDESLAND_CONFIG, RETAIL_CHAINS_ROTATION
 from retail_store_builder_filter import STRICT_GU_MARKERS, is_generalunternehmer
 from scraper_env import get_anthropic_api_key
 
@@ -43,6 +43,9 @@ def validate_discovery_term(term: str) -> bool:
     from de_gu_keywords import SERPER_NEGATIVE_TERMS
 
     if any(neg in low for neg in SERPER_NEGATIVE_TERMS if len(neg) >= 4):
+        return False
+    chains_low = [c.lower() for c in RETAIL_CHAINS_ROTATION]
+    if not any(chain in low for chain in chains_low):
         return False
     return True
 

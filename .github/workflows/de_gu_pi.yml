@@ -2,8 +2,8 @@ name: GU piatek discovery
 
 on:
   schedule:
-    # 15:00 UTC = 17:00 Europe/Warsaw (CEST); zimą (CET) ustaw 16:00 UTC
-    - cron: "0 15 * * 5"
+    # 18:00 UTC = 20:00 Europe/Warsaw (CEST); zimą (CET) ustaw 19:00 UTC
+    - cron: "0 18 * * 5"
   workflow_dispatch:
 
 permissions:

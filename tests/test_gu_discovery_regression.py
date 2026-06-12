@@ -22,6 +22,8 @@ if str(ROOT) not in sys.path:
 import de_gu_bauunternehmen_scraper as scraper
 from de_gu_keywords import (
     ALL_BUNDESLAENDER,
+    RETAIL_CHAINS_ROTATION,
+    build_discovery_terms,
     default_max_discovery_terms_for,
 )
 from retail_store_builder_filter import (
@@ -551,7 +553,7 @@ class SerperOnlyFilterRegression(unittest.TestCase):
             "www": "https://weber-gu.de",
             "retail_verified": False,
             "verification_reason": scraper.PENDING_WWW_VERIFY_REASON,
-            "page_snippet": "Generalunternehmer Filialbau Gewerbebau Referenz Lidl",
+            "page_snippet": "Generalunternehmer Filialbau Gewerbebau Referenz Aldi Neubau",
             "email_target": "",
         }
         self.assertTrue(scraper.is_row_eligible_for_excel_export(row))
@@ -901,6 +903,32 @@ class DiscoveryFunnelRegression(unittest.TestCase):
         with self.assertLogs(_LOGGER, level="INFO") as captured:
             scraper.log_discovery_funnel(funnel, _LOGGER)
         self.assertTrue(any("[LEjek]" in m for m in captured.output))
+
+
+class RetailChainSerperRotationRegression(unittest.TestCase):
+    def test_discovery_terms_include_rotating_chains(self):
+        terms = build_discovery_terms(["Nordrhein-Westfalen"], max_terms=21)
+        chains_low = [c.lower() for c in RETAIL_CHAINS_ROTATION]
+        for term in terms:
+            self.assertTrue(
+                any(c in term.lower() for c in chains_low),
+                msg=f"brak sieci w frazie: {term}",
+            )
+        found = {
+            c
+            for c in RETAIL_CHAINS_ROTATION
+            if any(c.lower() in t.lower() for t in terms)
+        }
+        self.assertGreaterEqual(len(found), 3)
+
+    def test_discovery_terms_cycle_all_whitelist_chains(self):
+        terms = build_discovery_terms(["Bayern"], max_terms=len(RETAIL_CHAINS_ROTATION) * 2)
+        found = [
+            c
+            for c in RETAIL_CHAINS_ROTATION
+            if any(c.lower() in t.lower() for t in terms)
+        ]
+        self.assertEqual(len(found), len(RETAIL_CHAINS_ROTATION))
 
 
 class RotationThresholdRegression(unittest.TestCase):

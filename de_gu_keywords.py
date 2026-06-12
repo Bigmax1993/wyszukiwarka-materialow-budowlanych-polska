@@ -50,29 +50,32 @@ RETAIL_CHAINS_ROTATION = (
     "Netto",
     "Penny",
     "Kaufland",
+    "Lidl",
     "Norma",
+)
+
+# Każda fraza Serper: GU + {city} + rotująca sieć {chain} (RETAIL_CHAINS_ROTATION).
+CHAIN_SIMPLE_TERM_TEMPLATES = (
+    "Generalunternehmer Filialbau {city} {chain} markt",
+    "Generalunternehmer Filialbau {city} {chain} Neubau",
+    "GU Supermarktbau {city} {chain}",
+    "GU Filialbau {city} {chain} markt",
+    "Generalunternehmer Einzelhandel {city} {chain}",
+    "GU Gewerbebau {city} {chain} Markt",
+    "Komplettgeneralunternehmer Filialbau {city} {chain}",
 )
 
 TERM_TEMPLATES = (
     "Generalunternehmer Filialbau {city} {chain} Referenzprojekte",
     "Generalunternehmer Ladenbau {city} {land} {chain} Neubau",
     "GU Hochbau Supermarktbau {city} {chain} regional",
-    "Generalunternehmer Einzelhandelsbau {city} Familienunternehmen",
+    "Generalunternehmer Einzelhandelsbau {city} {chain} markt",
     "Generalunternehmer {city} Filialumbau {chain}",
     "GU Gewerbebau {city} Discounter {chain} Referenz",
 )
 
-# Krótsze frazy Serper — każda musi zawierać Generalunternehmer lub GU
-SIMPLE_TERM_TEMPLATES = (
-    "Generalunternehmer Filialbau {city}",
-    "Generalunternehmer {city}",
-    "GU Hochbau {city}",
-    "Generalunternehmer Einzelhandel {city}",
-    "Generalunternehmer Supermarktbau {city}",
-    "GU Gewerbebau {city}",
-    "Komplettgeneralunternehmer {city}",
-    "Generalunternehmer Ladenbau {city}",
-)
+# Alias dla promptów Claude / campaign_keyword_profile ({chain} w szablonie).
+SIMPLE_TERM_TEMPLATES = CHAIN_SIMPLE_TERM_TEMPLATES
 
 BUNDESLAND_CONFIG: dict[str, dict] = {
     "Nordrhein-Westfalen": {
@@ -269,6 +272,22 @@ def _append_unique_term(terms: list[str], seen: set[str], text: str, *, max_term
     return len(terms) >= max_terms
 
 
+def _rotating_chain(counter: list[int]) -> str:
+    chain = RETAIL_CHAINS_ROTATION[counter[0] % len(RETAIL_CHAINS_ROTATION)]
+    counter[0] += 1
+    return chain
+
+
+def _format_chain_term(
+    tmpl: str,
+    *,
+    city: str,
+    land: str,
+    chain: str,
+) -> str:
+    return tmpl.format(city=city, land=land, chain=chain)
+
+
 def build_discovery_terms(
     active: list[str] | None = None, *, max_terms: int | None = None
 ) -> list[str]:
@@ -277,36 +296,37 @@ def build_discovery_terms(
         max_terms = default_max_discovery_terms_for(lands)
     seen: set[str] = set()
     terms: list[str] = []
-    chain_i = 0
+    chain_counter = [0]
+    all_templates = (*CHAIN_SIMPLE_TERM_TEMPLATES, *TERM_TEMPLATES)
     for land in lands:
         cfg = BUNDESLAND_CONFIG[land]
         cities = cfg["cities"]
         for city in cities:
-            for tmpl in SIMPLE_TERM_TEMPLATES:
-                if _append_unique_term(
-                    terms, seen, tmpl.format(city=city), max_terms=max_terms
-                ):
-                    return terms
-        for city in cities:
-            for tmpl in TERM_TEMPLATES:
-                chain = RETAIL_CHAINS_ROTATION[chain_i % len(RETAIL_CHAINS_ROTATION)]
-                chain_i += 1
+            for tmpl in all_templates:
+                chain = _rotating_chain(chain_counter)
                 if _append_unique_term(
                     terms,
                     seen,
-                    tmpl.format(city=city, land=land, chain=chain),
+                    _format_chain_term(tmpl, city=city, land=land, chain=chain),
                     max_terms=max_terms,
                 ):
                     return terms
     if len(lands) >= 10:
-        for raw in (
-            "Generalunternehmer Filialbau Deutschland Referenzprojekte",
-            "GU Supermarktbau Deutschland Rewe Aldi",
-            "Generalunternehmer Einzelhandel Deutschland Neubau",
-            "Komplettgeneralunternehmer Filialbau bundesweit",
-            "Generalunternehmer Ladenbau Deutschland regional",
-        ):
-            if _append_unique_term(terms, seen, raw, max_terms=max_terms):
+        bundesweit = (
+            "Generalunternehmer Filialbau Deutschland {chain} Referenzprojekte",
+            "GU Supermarktbau Deutschland {chain} Neubau",
+            "Generalunternehmer Einzelhandel Deutschland {chain} markt",
+            "Komplettgeneralunternehmer Filialbau Deutschland {chain}",
+            "Generalunternehmer Ladenbau Deutschland {chain} regional",
+        )
+        for tmpl in bundesweit:
+            chain = _rotating_chain(chain_counter)
+            if _append_unique_term(
+                terms,
+                seen,
+                tmpl.format(chain=chain),
+                max_terms=max_terms,
+            ):
                 return terms
     return terms
 
@@ -316,19 +336,27 @@ def build_landkreis_discovery_terms(active: list[str] | None = None) -> list[str
     lands = resolve_active_bundeslaender(active)
     seen: set[str] = set()
     terms: list[str] = []
+    chain_counter = [0]
     for land in lands:
         short = BUNDESLAND_CONFIG[land]["short"]
         for city in BUNDESLAND_CONFIG[land]["cities"][:6]:
-            for raw in (
-                f"Generalunternehmer Filialbau Landkreis {city}",
-                f"Generalunternehmer Ladenbau {city} Kreis {short}",
-                f"GU Gewerbebau {city} Landkreis",
+            for tmpl in (
+                "Generalunternehmer Filialbau Landkreis {city} {chain} markt",
+                "Generalunternehmer Ladenbau {city} Kreis {short} {chain}",
+                "GU Gewerbebau {city} Landkreis {chain}",
             ):
-                _append_unique_term(terms, seen, raw, max_terms=10_000)
+                chain = _rotating_chain(chain_counter)
+                _append_unique_term(
+                    terms,
+                    seen,
+                    tmpl.format(city=city, short=short, chain=chain),
+                    max_terms=10_000,
+                )
+        chain = _rotating_chain(chain_counter)
         _append_unique_term(
             terms,
             seen,
-            f"Generalunternehmer Filialbau {land} Landkreis",
+            f"Generalunternehmer Filialbau {land} Landkreis {chain} markt",
             max_terms=10_000,
         )
     return terms
@@ -339,19 +367,24 @@ def build_places_discovery_terms(active: list[str] | None = None) -> list[str]:
     lands = resolve_active_bundeslaender(active)
     seen: set[str] = set()
     terms: list[str] = []
+    chain_counter = [0]
     for land in lands:
         for city in BUNDESLAND_CONFIG[land]["cities"][:8]:
-            for raw in (
-                f"Generalunternehmer Filialbau {city}",
-                f"Generalunternehmer Ladenbau {city}",
-                f"GU Hochbau {city}",
-                f"Generalunternehmer {city}",
+            for tmpl in (
+                "Generalunternehmer Filialbau {city} {chain} markt",
+                "Generalunternehmer Ladenbau {city} {chain}",
+                "GU Hochbau {city} {chain}",
+                "Generalunternehmer {city} {chain} Filialbau",
             ):
-                _append_unique_term(terms, seen, raw, max_terms=10_000)
+                chain = _rotating_chain(chain_counter)
+                _append_unique_term(
+                    terms, seen, tmpl.format(city=city, chain=chain), max_terms=10_000
+                )
+        chain = _rotating_chain(chain_counter)
         _append_unique_term(
             terms,
             seen,
-            f"Generalunternehmer Filialbau {land}",
+            f"Generalunternehmer Filialbau {land} {chain} markt",
             max_terms=10_000,
         )
     return terms
@@ -362,48 +395,59 @@ def build_broad_discovery_terms(active: list[str] | None = None) -> list[str]:
     lands = resolve_active_bundeslaender(active)
     seen: set[str] = set()
     terms: list[str] = []
+    chain_counter = [0]
     for land in lands:
         short = BUNDESLAND_CONFIG[land]["short"]
         for city in BUNDESLAND_CONFIG[land]["cities"]:
-            for raw in (
-                f"Generalunternehmer {city}",
-                f"Generalunternehmer {city} Bau",
-                f"GU Filialbau {city}",
-                f"Generalunternehmer Ladenbau {city}",
+            for tmpl in (
+                "Generalunternehmer {city} {chain} Filialbau",
+                "Generalunternehmer {city} {chain} Bau",
+                "GU Filialbau {city} {chain}",
+                "Generalunternehmer Ladenbau {city} {chain}",
             ):
-                _append_unique_term(terms, seen, raw, max_terms=10_000)
-        for raw in (
-            f"Generalunternehmer Filialbau {land}",
-            f"Generalunternehmer Ladenbau {land}",
-            f"GU Filialbau {short}",
-            f"GU Supermarktbau {land}",
-            f"Generalunternehmer Einzelhandel {land}",
+                chain = _rotating_chain(chain_counter)
+                _append_unique_term(
+                    terms, seen, tmpl.format(city=city, chain=chain), max_terms=10_000
+                )
+        for tmpl in (
+            "Generalunternehmer Filialbau {land} {chain} markt",
+            "Generalunternehmer Ladenbau {land} {chain}",
+            "GU Filialbau {short} {chain}",
+            "GU Supermarktbau {land} {chain}",
+            "Generalunternehmer Einzelhandel {land} {chain}",
         ):
-            _append_unique_term(terms, seen, raw, max_terms=10_000)
+            chain = _rotating_chain(chain_counter)
+            _append_unique_term(
+                terms,
+                seen,
+                tmpl.format(land=land, short=short, chain=chain),
+                max_terms=10_000,
+            )
     return terms
 
 
 def build_fallback_terms(active: list[str] | None = None) -> list[str]:
     lands = resolve_active_bundeslaender(active)
     fb: list[str] = []
+    chain_counter = [0]
     for land in lands:
         short = BUNDESLAND_CONFIG[land]["short"]
-        fb.extend(
-            [
-                f"Generalunternehmer Filialbau {land}",
-                f"Generalunternehmer Hochbau Einzelhandel {short}",
-                f"Generalunternehmer Ladenbau {land} Referenz",
-                f"GU Supermarktbau {land} regional",
-            ]
-        )
-    fb.extend(
-        [
-            "Generalunternehmer Filialbau Deutschland Referenz",
-            "GU Hochbau Discounter Neubau Deutschland",
-            "Komplettgeneralunternehmer Einzelhandel Filialumbau",
-            "Generalunternehmer Handelsimmobilie Aldi Rewe",
-        ]
-    )
+        for tmpl in (
+            "Generalunternehmer Filialbau {land} {chain} markt",
+            "Generalunternehmer Hochbau Einzelhandel {short} {chain}",
+            "Generalunternehmer Ladenbau {land} {chain} Referenz",
+            "GU Supermarktbau {land} {chain} regional",
+        ):
+            chain = _rotating_chain(chain_counter)
+            fb.append(tmpl.format(land=land, short=short, chain=chain))
+    for tmpl in (
+        "Generalunternehmer Filialbau Deutschland {chain} Referenz",
+        "GU Hochbau Discounter {chain} Neubau Deutschland",
+        "Komplettgeneralunternehmer Einzelhandel {chain} Filialumbau",
+        "Generalunternehmer Handelsimmobilie {chain} markt",
+    ):
+        chain = _rotating_chain(chain_counter)
+        fb.append(tmpl.format(chain=chain))
     seen: set[str] = set()
     out: list[str] = []
     for t in fb:

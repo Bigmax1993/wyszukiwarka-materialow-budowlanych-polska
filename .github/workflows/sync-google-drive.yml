@@ -5,7 +5,7 @@ name: Sync wyniki Google Drive
 # - Źródło danych: pierwszy dostępny artefakt thu → wed → mon → tue → fri
 #   (Excel po niedzielnym backfillu; NIE fri/tue z poprzedniej wysyłki).
 # - Tylko workflow_dispatch + schedule (bez auto-triggera po wysyłce).
-# - Excel (.xlsx): zawsze nowy plik z datą (GDRIVE_VERSION_XLSX=1), bez nadpisywania.
+# - Excel (.xlsx): kopia z datą + nadpisanie de_gu_bauunternehmen_kontakte.xlsx (aktualny).
 
 on:
   workflow_dispatch:

@@ -346,15 +346,19 @@ def upload_files_flat(service, MediaFileUpload, local_dir: Path, drive_parent_id
         return 0
     count = 0
     for p in sorted(local_dir.iterdir()):
-        if p.is_file():
-            drive_name = (
-                versioned_xlsx_upload_name(p.name)
-                if _gdrive_version_xlsx_enabled() and p.suffix.lower() == ".xlsx"
-                else p.name
-            )
-            _upload_file(service, MediaFileUpload, p, drive_parent_id)
-            print(f"  OK {drive_name}")
+        if not p.is_file():
+            continue
+        if p.suffix.lower() == ".xlsx" and _gdrive_version_xlsx_enabled():
+            dated = versioned_xlsx_upload_name(p.name)
+            _upload_file(service, MediaFileUpload, p, drive_parent_id, version_xlsx=True)
+            print(f"  OK {dated}")
+            _upload_file(service, MediaFileUpload, p, drive_parent_id, version_xlsx=False)
+            print(f"  OK {p.name} (aktualny)")
             count += 1
+            continue
+        _upload_file(service, MediaFileUpload, p, drive_parent_id)
+        print(f"  OK {p.name}")
+        count += 1
     return count
 
 

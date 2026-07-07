@@ -1,5 +1,6 @@
 name: UA discovery
 
+# Kampania UA — harmonogram jak DE GU (pon-pt discovery)
 on:
   schedule:
     - cron: "0 17 * * 1"
@@ -59,7 +60,7 @@ jobs:
 
       - uses: ./.github/actions/setup-scraper
 
-      - name: Resolve artifact run (poniedzialek–piatek)
+      - name: Resolve artifact run (poniedzialek-piatek)
         id: prev_run
         continue-on-error: true
         env:

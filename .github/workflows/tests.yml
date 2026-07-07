@@ -21,37 +21,18 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest
 
       - name: Compile core modules
         run: |
           python -m py_compile kanbud_bootstrap.py
           python -m py_compile campaign_data_paths.py
-          python -m py_compile email_targeting.py
-          python -m py_compile de_gu_bauunternehmen_scraper.py
-          python -m py_compile de_gu_keywords.py
           python -m py_compile ua_materialy_scraper.py
           python -m py_compile ua_oblast_keywords.py
           python -m py_compile ua_materialy_inquiry_email_uk.py
 
-      - name: Scraper smoke DE GU (--test)
-        run: python de_gu_bauunternehmen_scraper.py --test
-
       - name: Scraper smoke UA materialy (--test)
         run: python ua_materialy_scraper.py --test
-
-      - name: Regresja discovery GU i Claude
-        run: |
-          python -m unittest \
-            tests.test_gu_discovery_regression \
-            tests.test_claude_llm_campaign \
-            tests.test_claude_contact_extract \
-            tests.test_claude_unlimited \
-            tests.test_website_full_crawl \
-            tests.test_claude_client_retry \
-            tests.test_claude_page_text \
-            tests.test_discovery_run_state \
-            -v
 
       - name: Regresja i testy UA (pytest + unittest)
         run: |

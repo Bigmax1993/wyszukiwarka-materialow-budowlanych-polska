@@ -1,5 +1,6 @@
 name: UA wtorek send
 
+# Kampania UA — wysylka wtorek
 on:
   schedule:
     - cron: "0 9 * * 2"

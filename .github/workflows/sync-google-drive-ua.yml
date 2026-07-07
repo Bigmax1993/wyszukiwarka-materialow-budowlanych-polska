@@ -1,5 +1,6 @@
 name: Sync wyniki Google Drive UA
 
+# Kampania UA — sync Drive poniedzialek
 on:
   workflow_dispatch:
     inputs:

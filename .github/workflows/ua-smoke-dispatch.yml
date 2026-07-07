@@ -1,0 +1,14 @@
+name: UA smoke dispatch
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/ua-smoke-dispatch.yml"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "UA workflows OK"

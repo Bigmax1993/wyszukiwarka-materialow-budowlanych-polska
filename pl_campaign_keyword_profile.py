@@ -30,6 +30,7 @@ REJECT_PRIMARY_ROLES = frozenset(
         "Wykończenia wnętrz",
         "Remont pod klucz",
         "Wykonawca bez sprzedaży",
+        "Sklep detaliczny",
         "Ogłoszenie",
         "Inne",
     }

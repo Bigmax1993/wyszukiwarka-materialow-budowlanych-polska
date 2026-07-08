@@ -14,7 +14,10 @@ from pl_campaign_keyword_profile import (
     small_company_markers_sample,
 )
 
-_REQUIRED_MATERIALS = "cement, piasek, щебінь, цегла, блок, арматура, утеплювач, плитка, гіпсокартон"
+_REQUIRED_MATERIALS = (
+    "cement, piasek, żwir, cegła, bloczek, pustak, beton, stal zbrojeniowa, "
+    "styropian, wełna mineralna, płytki, płyta gipsowa, dachówka, drewno konstrukcyjne"
+)
 PAGE_VERIFY_MAX_CHARS = 18000
 CONTACT_EXTRACT_MAX_CHARS = 16000
 _CONTACT_EXTRACT_TEXT_PRIORITY = (
@@ -31,22 +34,25 @@ _CONTACT_EXTRACT_TEXT_PRIORITY = (
     "адреса",
 )
 _PAGE_VERIFY_TEXT_PRIORITY = (
+    "hurtownia materiałów budowlanych",
     "materiały budowlane",
     "budowlane",
-    "каталог",
-    "асортимент",
-    "продукція",
-    "прайс",
-    "ціни",
-    "опт",
-    "склад",
-    "доставка",
-    "цемент",
-    "пісок",
-    "щебінь",
-    "цегла",
-    "утеплювач",
-    "плитка",
+    "hurtownia",
+    "hurt",
+    "sprzedaż hurtowa",
+    "ceny hurtowe",
+    "skład budowlany",
+    "dla firm",
+    "asortyment",
+    "katalog",
+    "cennik",
+    "oferta",
+    "dostawa",
+    "cement",
+    "piasek",
+    "cegła",
+    "styropian",
+    "płytki",
 )
 
 
@@ -122,40 +128,56 @@ def build_page_verify_prompt(
     neg_kw = ", ".join(negative_keywords_sample())
     small_kw = ", ".join(small_company_markers_sample())
     large_kw = ", ".join(large_company_markers_sample())
-    return f"""РОЛЬ
-Ти — аналітик B2B для пошуку постачальників будівельних матеріалів в Polskі.
-Ціль: гуртові склади, магазини будматеріалів, виробники та дистриб'ютори.
-НЕ ціль: портали новин, держустанови, чисті підрядники без продажу матеріалів, оголошення OLX.
+    return f"""ROLA
+Jesteś analitykiem B2B. Szukasz WYŁĄCZNIE hurtowni / składów hurtowych materiałów budowlanych działających w POLSCE.
 
-ЗАВДАННЯ
-Прочитай витяг сайту (усі підсторінки, позначені «=== URL ===»).
-Чи це комерційний постачальник будматеріалів? Відповідай ЛИШЕ JSON — без markdown.
+CEL (is_gu=true) — muszą być spełnione JEDNOCZEŚNIE:
+1) Sprzedaż HURTOWA materiałów budowlanych (hurt, hurtownia, sprzedaż/ceny hurtowe, skład budowlany, oferta dla firm/wykonawców).
+2) Asortyment materiałów budowlanych (np. {_REQUIRED_MATERIALS}).
+3) Działalność w Polsce (polski adres, domena .pl, województwo, numer +48, NIP).
 
-ЩО ВВАЖАЄТЬСЯ ДОКАЗОМ
-• Продаж/опт будматеріалів, склад, доставка, каталог, прайс
-• Згадка категорій: {_REQUIRED_MATERIALS}
-• Роль: постачальник, виробник, дистриб'ютор, будмаркет, будівельна база
+NIE CEL (is_gu=false):
+• Sklepy WYŁĄCZNIE detaliczne / markety DIY bez oferty hurtowej → primary_role="Sklep detaliczny"
+• Wykonawcy i usługi budowlane bez sprzedaży materiałów → primary_role="Wykonawca bez sprzedaży"
+• Biura projektowe/architektoniczne, wykończenia wnętrz, remonty pod klucz
+• Portale, media, urzędy, banki, ogłoszenia (OLX/Allegro)
+• Firmy spoza Polski (choćby sprzedawały hurtowo) → dodaj "poza polską" do matched_negative_keywords
 
-ВІДХИЛИТИ (is_gu=false / has_retail_context=false)
-• Biuro architektoniczne, дизайн інтер'єру, ремонт квартир без продажу матеріалів
-• Новини, медіа, держоргани, банки, вакансії без комерційної пропозиції
-• OLX/оголошення б/у без стабільного бізнесу постачальника
+ZADANIE
+Przeczytaj wyciąg ze strony (wszystkie podstrony oznaczone «=== URL ===»).
+Czy to hurtownia / skład hurtowy materiałów budowlanych w Polsce? Odpowiedz TYLKO w formacie JSON — bez markdown.
 
-ПОЛЯ JSON (ті самі ключі для сумісності з pipeline)
-• is_gu = true якщо це постачальник/виробник/склад будматеріалів
-• has_retail_context = true якщо є комерційна пропозиція матеріалів (каталог, асортимент, ціни, опт)
-• matched_chains = категорії матеріалів з тексту (cement, piasek, …) — лише якщо згадані
-• is_small_firm = регіональна/мала фірма (не велика міжнародна мережа)
+CO JEST DOWODEM (is_gu=true)
+• Fraza roli hurtowej: hurt, hurtownia, sprzedaż hurtowa, ceny hurtowe, skład budowlany, dla firm/wykonawców
+• Realna oferta handlowa: asortyment, katalog, cennik, dostawa
+• Kategorie materiałów: {_REQUIRED_MATERIALS}
 
-МАЛІ ОЗНАКИ: {small_kw}
-ВЕЛИКІ ОЗНАКИ (is_small_firm=false): {large_kw}
+ODRZUĆ (is_gu=false / has_retail_context=false)
+• Brak jakiejkolwiek oferty hurtowej (tylko detal) — to nie jest hurtownia
+• Wykonawca/usługa bez sprzedaży materiałów, biuro architektoniczne, wykończenia, remonty pod klucz
+• Media, portale, urzędy, banki, ogłoszenia, giełdy używanych
+• Firma bez działalności w Polsce
 
-КЛЮЧОВІ СЛОВА ПОСТАЧАЛЬНИКА: {supplier_kw}
-КОНТЕКСТ МАТЕРІАЛІВ: {material_kw}
-КАТЕГОРІЇ: {category_kw}
-НЕГАТИВ: {neg_kw}
+POLA JSON (te same klucze dla zgodności z pipeline)
+• is_gu = true TYLKO jeśli hurtownia/skład hurtowy materiałów budowlanych w Polsce (pkt 1–3 spełnione)
+• has_retail_context = true jeśli jest realna oferta handlowa materiałów (asortyment, katalog, cennik, hurt)
+• matched_gu_keywords = dopasowane frazy roli hurtowej ze strony
+• matched_retail_keywords = dopasowane frazy oferty/asortymentu
+• matched_chains = kategorie materiałów z tekstu (cement, piasek, …) — tylko jeśli wymienione
+• matched_negative_keywords = trafienia negatywne; dodaj "poza polską" gdy firma nie działa w Polsce
+• is_small_firm = mała/regionalna firma (nie duża sieć / międzynarodowy koncern)
+• primary_role = jedna z: Hurtownia, Skład budowlany, Dystrybutor hurtowy, Sklep detaliczny, Producent, Wykonawca bez sprzedaży, Biuro architektoniczne, Media, Portal, Urząd, Bank, Ogłoszenie, Inne
+• reason = krótkie uzasadnienie po polsku
 
-СХЕМА JSON
+MAŁE OZNAKI: {small_kw}
+DUŻE OZNAKI (is_small_firm=false): {large_kw}
+
+SŁOWA KLUCZOWE HURTOWNI: {supplier_kw}
+KONTEKST MATERIAŁÓW: {material_kw}
+KATEGORIE: {category_kw}
+NEGATYW: {neg_kw}
+
+SCHEMA JSON
 {{
   "matched_gu_keywords": [],
   "matched_retail_keywords": [],
@@ -168,14 +190,14 @@ def build_page_verify_prompt(
   "reason": ""
 }}
 
-КОНТЕКСТ
+KONTEKST
 {header}
 
-АВТОДОКАЗИ
+AUTODOWODY
 {evidence}
 
-ВИТЯГ САЙТУ
-{snippet or "(порожньо)"}
+WYCIĄG ZE STRONY
+{snippet or "(pusto)"}
 """
 
 

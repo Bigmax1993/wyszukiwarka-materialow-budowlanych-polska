@@ -18,6 +18,10 @@ GOOGLE_DRIVE_GU_FOLDER_ID = "1tP8oUi72t4EHDbE9GnHFdvfNtNsJe4xf"
 GOOGLE_DRIVE_GU_FOLDER_URL = (
     f"https://drive.google.com/drive/folders/{GOOGLE_DRIVE_GU_FOLDER_ID}?usp=drive_link"
 )
+GOOGLE_DRIVE_PL_FOLDER_ID = "1O15CdN0TH8rx74sPP5C1GuYSweX81IGw"
+GOOGLE_DRIVE_PL_FOLDER_URL = (
+    f"https://drive.google.com/drive/folders/{GOOGLE_DRIVE_PL_FOLDER_ID}?usp=drive_link"
+)
 
 # Nazwy podfolderów szukane pod „Google Drive” / „Dyski współdzielone”
 _DRIVE_FOLDER_NAMES_GU = (
@@ -29,6 +33,11 @@ _DRIVE_FOLDER_NAMES_UA = (
     "UA Materialy Budowlane Wyniki",
     "Kanbud UA Materialy Wyniki",
     "ua_materialy_wyniki",
+)
+_DRIVE_FOLDER_NAMES_PL = (
+    "PL Materialy Budowlane Wyniki",
+    "Kanbud PL Materialy Wyniki",
+    "pl_materialy_wyniki",
 )
 _DRIVE_FOLDER_NAMES = _DRIVE_FOLDER_NAMES_GU
 
@@ -54,9 +63,14 @@ def _google_drive_bases() -> list[Path]:
 def resolve_data_root(campaign_dir: Path, *, campaign: str = "gu") -> Path:
     """
     Katalog danych kampanii: Wyniki/, wyslane/.
-    campaign: gu | ua
+    campaign: gu | ua | pl
     """
-    folder_names = _DRIVE_FOLDER_NAMES_UA if campaign == "ua" else _DRIVE_FOLDER_NAMES_GU
+    if campaign == "ua":
+        folder_names = _DRIVE_FOLDER_NAMES_UA
+    elif campaign == "pl":
+        folder_names = _DRIVE_FOLDER_NAMES_PL
+    else:
+        folder_names = _DRIVE_FOLDER_NAMES_GU
     for key in ("KANBUD_DATA_DIR", "KANBUD_GOOGLE_DRIVE_GU_PATH", "KANBUD_GOOGLE_DRIVE_PATH"):
         raw = (os.environ.get(key) or "").strip()
         if raw:
@@ -100,7 +114,11 @@ def campaign_output_paths(campaign_dir: Path, basename: str) -> dict[str, Path]:
     """
     basename np. de_gu_bauunternehmen lub ua_materialy → pliki w Wyniki/.
     """
-    campaign = "ua" if basename.startswith("ua_") else "gu"
+    campaign = (
+        "pl" if basename.startswith("pl_")
+        else "ua" if basename.startswith("ua_")
+        else "gu"
+    )
     root = apply_data_root_to_env(resolve_data_root(campaign_dir, campaign=campaign))
     out = wyniki_dir(root)
     return {

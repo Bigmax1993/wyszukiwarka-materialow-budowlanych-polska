@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
 
 from campaign_data_paths import (  # noqa: E402
     GOOGLE_DRIVE_GU_FOLDER_ID,
+    GOOGLE_DRIVE_PL_FOLDER_ID,
     resolve_data_root,
     wyniki_dir,
     wyslane_dir,
@@ -382,6 +383,17 @@ def upload_folder_named(
     return count
 
 
+def _default_folder_id(campaign: str) -> str:
+    explicit = (os.environ.get("GDRIVE_FOLDER_ID") or "").strip()
+    if explicit:
+        return explicit
+    if campaign == "pl":
+        return (os.environ.get("GDRIVE_FOLDER_ID_PL") or GOOGLE_DRIVE_PL_FOLDER_ID).strip()
+    if campaign == "ua":
+        return (os.environ.get("GDRIVE_FOLDER_ID_UA") or GOOGLE_DRIVE_GU_FOLDER_ID).strip()
+    return GOOGLE_DRIVE_GU_FOLDER_ID
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Upload Wyniki do Google Drive")
     parser.add_argument(
@@ -392,20 +404,21 @@ def main() -> int:
     )
     parser.add_argument(
         "--campaign",
-        choices=("gu", "ua"),
+        choices=("gu", "ua", "pl"),
         default="gu",
-        help="Kampania: gu | ua (folder Drive / resolve_data_root)",
+        help="Kampania: gu | ua | pl (folder Drive / resolve_data_root)",
     )
     parser.add_argument(
         "--folder-id",
-        default=os.environ.get("GDRIVE_FOLDER_ID", GOOGLE_DRIVE_GU_FOLDER_ID),
+        default=None,
     )
     args = parser.parse_args()
+    folder_id = (args.folder_id or _default_folder_id(args.campaign)).strip()
 
     creds, use_oauth = _load_credentials()
     service, MediaFileUpload = _drive_service(creds)
     data_root = resolve_data_root(args.campaign_dir, campaign=args.campaign)
-    upload_folder_id = _resolve_upload_folder(service, args.folder_id, use_oauth=use_oauth)
+    upload_folder_id = _resolve_upload_folder(service, folder_id, use_oauth=use_oauth)
 
     total = 0
     w = wyniki_dir(data_root)

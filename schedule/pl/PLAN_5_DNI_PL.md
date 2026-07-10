@@ -5,7 +5,7 @@ Wysyłka **pon 14:00** + **wt 14:00** (2×300 maili/dzień). Maile po polsku, te
 
 ## Offset względem UA
 
-Każdy etap PL startuje **5 godzin po** odpowiednim etapie UA — oba pipeline mogą działać równolegle na GitHub Actions (`ua-pipeline` / `pl-pipeline`).
+Każdy etap PL startuje **5 godzin po** odpowiednim etapie UA. Po rozdzieleniu repozytoriów oba pipeline działają niezależnie (osobne repo, osobne secrets, osobny `pl-pipeline` / `ua-pipeline`).
 
 | Etap | UA (PL czas) | PL (+5h) |
 |------|--------------|----------|

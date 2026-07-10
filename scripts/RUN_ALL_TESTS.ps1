@@ -66,7 +66,7 @@ commit_rotation_after_run(p, s, woj)
 "@
 }
 
-Test-Step "pl_materialy — brak zalacznikow" {
+Test-Step "pl_materialy - brak zalacznikow" {
     python -c @"
 import pl_materialy_scraper as pl
 assert pl.get_email_attachments_pl_materialy() == []

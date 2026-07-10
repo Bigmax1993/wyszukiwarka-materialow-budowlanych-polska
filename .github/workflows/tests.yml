@@ -31,7 +31,6 @@ jobs:
           python -m py_compile pl_wojewodztwo_keywords.py
           python -m py_compile pl_materialy_inquiry_email_pl.py
           python -m py_compile pl_claude_prompts.py
-          python -m py_compile pl_claude_contact_extract.py
           python -m py_compile contact_extract_utils.py
 
       - name: Scraper smoke PL materialy (--test)

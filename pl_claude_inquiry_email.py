@@ -10,7 +10,6 @@ from claude_client import claude_generate_text
 from email_custom_template import parse_llm_email_json
 from scraper_env import get_anthropic_api_key
 from pl_claude_prompts import build_personalized_inquiry_email_prompt_pl
-from pl_materialy_inquiry_email_pl import build_inquiry_signature_pl
 
 
 def _contact_blob(contact_info: dict | None) -> dict[str, str]:
@@ -90,16 +89,13 @@ def claude_generate_inquiry_email_pl(
         logger.info("Claude inquiry email PL, model=%s, key=%s", model, key[:80])
         fallback_subject = f"Zapytanie o dostawę materiałów budowlanych — {display_name}"
         subject, body = parse_llm_email_json(text, fallback_subject)
-        signature = build_inquiry_signature_pl()
-        if signature and signature not in body:
-            body = body.rstrip() + "\n\n" + signature
         from pl_materialy_inquiry_email_pl import (
-            strip_foreign_phones_from_text,
-            strip_legacy_branding,
+            ensure_inquiry_signature,
+            strip_legacy_branding_preserve_layout,
         )
 
-        body = strip_foreign_phones_from_text(body)
-        body = strip_legacy_branding(body)
+        body = ensure_inquiry_signature(body)
+        body = strip_legacy_branding_preserve_layout(body)
         mail_cache[key] = {"subject": subject, "body": body, "model": model}
         return subject, body
     except (json.JSONDecodeError, ValueError, KeyError) as exc:

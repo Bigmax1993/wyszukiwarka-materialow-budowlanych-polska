@@ -116,7 +116,58 @@ def build_inquiry_signature_pl() -> str:
         lines.extend(["", web])
     phone = inquiry_phone()
     lines.extend(["", f"Tel.: {phone}"])
-    return strip_legacy_branding("\n".join(lines).strip())
+    return "\n".join(lines).strip()
+
+
+def body_has_inquiry_signature(body: str) -> bool:
+    low = (body or "").lower()
+    if "z poważaniem" not in low:
+        return False
+    name = inquiry_sender_name().strip()
+    if not name:
+        return False
+    first = name.split()[0].lower()
+    phone = re.sub(r"\D", "", inquiry_phone())
+    tail = low[-500:]
+    tail_digits = re.sub(r"\D", "", (body or "")[-500:])
+    return first in tail and phone in tail_digits
+
+
+def dedupe_inquiry_signature(body: str) -> str:
+    text = (body or "").strip()
+    if not text:
+        return text
+    name = inquiry_sender_name().strip()
+    if not name:
+        return text
+    search_from = max(0, len(text) - 800)
+    region = text[search_from:]
+    matches = list(re.finditer(r"z poważaniem", region, flags=re.IGNORECASE))
+    if len(matches) < 2:
+        return text
+    main = text[: search_from + matches[0].start()].rstrip()
+    last_sig = text[search_from + matches[-1].start() :].strip()
+    return f"{main}\n\n{last_sig}".strip()
+
+
+def ensure_inquiry_signature(body: str) -> str:
+    text = dedupe_inquiry_signature((body or "").strip())
+    if body_has_inquiry_signature(text):
+        return text
+    signature = build_inquiry_signature_pl()
+    if not signature:
+        return text
+    return text.rstrip() + "\n\n" + signature
+
+
+def strip_legacy_branding_preserve_layout(text: str) -> str:
+    if not text:
+        return ""
+    out = strip_foreign_phones_from_text(text)
+    out = _LEGACY_BRANDING_RE.sub("", out)
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in out.splitlines()]
+    out = "\n".join(lines).strip()
+    return re.sub(r"\n{3,}", "\n\n", out)
 
 
 def build_inquiry_sender_brief_pl() -> str:

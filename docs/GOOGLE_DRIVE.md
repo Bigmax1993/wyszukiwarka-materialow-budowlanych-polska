@@ -11,7 +11,7 @@ Folder w chmurze: [PL Materialy Budowlane](https://drive.google.com/drive/folder
 | Plik / folder | Opis |
 |---------------|------|
 | `pl_materialy_cache.json` | Cache (wersja `pl_enrichment_v2`) |
-| `pl_materialy_kontakte.xlsx` | Excel kontaktów |
+| `pl_materialy_kontakte.xlsx` | Excel kontaktów (jeden plik — append wierszy, bez kopii z datą) |
 | `pl_materialy_scraper.log` | Log |
 | `pl_materialy_wojewodztwo_rotation.json` | Stan rotacji województw |
 | `wyslane/*.eml` | Kopie wysłanych maili |
@@ -23,6 +23,15 @@ Folder w chmurze: [PL Materialy Budowlane](https://drive.google.com/drive/folder
 | **PC + Drive for desktop** | `KANBUD_DATA_DIR` → folder `PL Materialy Budowlane Wyniki` |
 
 Artefakt źródłowy sync: `pl-materialy-wyniki-thu` (niedzielny backfill). Szczegóły: [`docs/GITHUB_ACTIONS.md`](GITHUB_ACTIONS.md).
+
+### Excel — jeden plik, append
+
+| Zmienna | Domyślnie | Opis |
+|---------|-----------|------|
+| `GDRIVE_VERSION_XLSX` | `0` | Bez kopii z datą — zawsze ten sam `pl_materialy_kontakte.xlsx` |
+| `GDRIVE_APPEND_XLSX` | `1` | Przed uploadem: pobierz Excel z Drive, dopisz nowe wiersze (po URL), nadpisz plik |
+
+Stare pliki `pl_materialy_kontakte_2026-*_*.xlsx` można usunąć ręcznie z folderu Drive.
 
 ### Upload z GitHub Actions (OAuth)
 

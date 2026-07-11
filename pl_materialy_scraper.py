@@ -980,7 +980,9 @@ _COMPANY_LEGAL_FORM_PATTERN = (
     r"GbR\.?|"
     r"e\.?\s*K\.(?=\s|$)|"
     r"e\.?\s*K(?=\s|$)|"
-    r"KG|OHG|PartG|Co\.\s*KG|mbH|SE|SE\s*&\s*Co\.\s*KG)"
+    r"KG|OHG|PartG|Co\.\s*KG|mbH|SE|SE\s*&\s*Co\.\s*KG|"
+    r"sp\.?\s*z\.?\s*o\.?\s*o\.?|sp\.?\s*j\.?|sp\.?\s*k\.?|"
+    r"s\.?\s*a\.?|spółka\s+z\s+o\.?\s*o\.?|spolka\s+z\s+o\.?\s*o\.?)"
 )
 
 # Harte Ablehnung für Excel/LLM-Cleanup — kein Firmenname (PDF, Portale, Städte, SEO, Software …)
@@ -1095,6 +1097,10 @@ def is_rejected_company_name_for_export(
         return True
     if any(m in low for m in _COMPANY_NAME_HARD_REJECT_MARKERS):
         return True
+    from pl_contact_fields import is_pl_junk_company_name, is_pl_seo_title
+
+    if is_pl_junk_company_name(text) or is_pl_seo_title(text):
+        return True
     if (website or "").lower().find("/pdfs/") >= 0 or (website or "").lower().endswith(".pdf"):
         return True
     email_low = (email or "").lower()
@@ -1199,6 +1205,12 @@ def apply_row_enrichment_to_row(row: dict, llm_result: dict) -> None:
     row["company_name_clean"] = company
     row["nazwa"] = company
     row["adres"] = llm_result.get("address", row.get("adres", ""))
+    from pl_contact_fields import sanitize_export_address
+
+    row["adres"] = sanitize_export_address(
+        row["adres"],
+        fallback_text=str(row.get("page_snippet") or ""),
+    )
     row["full_address"] = row["adres"]
     row["telefon"] = llm_result.get("phone", row.get("telefon", ""))
     website = llm_result.get("website", row.get("official_website", ""))
@@ -1234,7 +1246,33 @@ def finalize_row_for_excel_tables(row: dict) -> dict:
     if url:
         row["url"] = url
     row["adres"] = sanitize_special_text(row.get("adres") or row.get("full_address") or "")
+    from pl_contact_fields import sanitize_export_address
+
+    row["adres"] = sanitize_export_address(
+        row["adres"],
+        fallback_text=str(row.get("page_snippet") or ""),
+    )
     row["full_address"] = row["adres"]
+    email = (row.get("email_target") or "").strip()
+    raw_name = (
+        row.get("company_name_clean") or row.get("nazwa") or row.get("company_name_raw") or ""
+    ).strip()
+    cleaned_name = finalize_company_name_for_export(
+        raw_name,
+        fallback_raw=row.get("company_name_raw") or raw_name,
+        website=website,
+        email=email,
+    )
+    if cleaned_name:
+        row["company_name_clean"] = cleaned_name
+        row["nazwa"] = cleaned_name
+    elif website:
+        domain_name = derive_name_from_website(website)
+        if domain_name and not is_rejected_company_name_for_export(
+            domain_name, website, email
+        ):
+            row["company_name_clean"] = domain_name
+            row["nazwa"] = domain_name
     phone = (row.get("telefon") or "").strip()
     if "," in phone:
         phone = phone.split(",", 1)[0].strip()
@@ -1294,6 +1332,12 @@ def enrich_row_with_claude_cleanup(row: dict, logger: logging.Logger, cache: dic
         or f"{(row.get('nazwa') or '').strip()}|{(row.get('www') or '').strip()}"
     )
     address = sanitize_special_text(row.get("full_address") or row.get("adres") or "")
+    from pl_contact_fields import sanitize_export_address
+
+    address = sanitize_export_address(
+        address,
+        fallback_text=str(row.get("page_snippet") or ""),
+    )
     phone = sanitize_special_text(row.get("phones_found") or row.get("telefon") or "")
     email = (row.get("email_target") or "").strip()
     website = sanitize_special_text(row.get("official_website") or row.get("www") or "")
@@ -1362,7 +1406,10 @@ def enrich_row_with_claude_cleanup(row: dict, logger: logging.Logger, cache: dic
     )
     claude_result = {
         "company_name_clean": cleaned_name,
-        "address": sanitize_special_text(parsed.get("address", address)) or address,
+        "address": sanitize_export_address(
+            sanitize_special_text(parsed.get("address", "")) or "",
+            fallback_text=str(row.get("page_snippet") or ""),
+        ),
         "phone": sanitize_special_text(parsed.get("phone", phone)) or phone,
         "website": sanitize_special_text(parsed.get("website", website)) or website,
         "bundesland": sanitize_special_text(parsed.get("bundesland", "")),
@@ -3103,6 +3150,19 @@ def merge_contacts_from_crawl(crawl, website: str) -> dict:
             f"{', '.join(impressum_emails[:3])}"
         )
     page_snippet = _truncate_page_snippet(" ".join(text_parts))
+    from pl_contact_fields import extract_pl_address_from_text
+
+    full_address = ""
+    for url in crawl.urls_visited:
+        if not _is_impressum_url(url) and "kontakt" not in (url or "").lower():
+            continue
+        details = crawl.pages.get(url) or {}
+        found = extract_pl_address_from_text(details.get("page_text") or "")
+        if found:
+            full_address = found
+            break
+    if not full_address:
+        full_address = extract_pl_address_from_text(page_snippet)
     return {
         "emails": emails,
         "impressum_emails": impressum_emails,
@@ -3111,6 +3171,7 @@ def merge_contacts_from_crawl(crawl, website: str) -> dict:
         "website": website,
         "source_urls": source_urls,
         "page_snippet": page_snippet,
+        "full_address": full_address,
     }
 
 
@@ -3564,7 +3625,11 @@ def _name_aligns_with_domain(name: str, website: str) -> bool:
 
 def should_prefer_domain_company_name(raw_name: str, website: str) -> bool:
     """True = nazwa z www.firma.de zamiast tytułu artykułu / nazwy marketu."""
+    from pl_contact_fields import is_pl_seo_title
+
     raw = " ".join((raw_name or "").split()).strip()
+    if is_pl_seo_title(raw):
+        return True
     domain_name = derive_name_from_website(website)
     if not domain_name:
         return False
@@ -4030,6 +4095,19 @@ def reconcile_contact_sources(row: dict, collected: dict) -> dict:
                 row["nazwa"] = clean
                 if not row.get("company_name_raw"):
                     row["company_name_raw"] = current or www_company
+    from pl_contact_fields import sanitize_export_address
+
+    snippet = str(collected.get("page_snippet") or row.get("page_snippet") or "")
+    crawl_addr = sanitize_export_address(collected.get("full_address") or "", fallback_text=snippet)
+    if crawl_addr:
+        row["full_address"] = crawl_addr
+        row["adres"] = crawl_addr
+    else:
+        row["adres"] = sanitize_export_address(
+            row.get("adres") or row.get("full_address") or "",
+            fallback_text=snippet,
+        )
+        row["full_address"] = row["adres"]
     return row
 
 
@@ -4371,7 +4449,10 @@ def discover_places_with_serper(
                     funnel["filtered_serper"] = funnel.get("filtered_serper", 0) + 1
                 continue
             title = (item.get("title") or "").strip()
-            snippet = (item.get("snippet") or item.get("address") or "").strip()
+            snippet = (item.get("snippet") or "").strip()
+            from pl_contact_fields import serper_discovery_address
+
+            discovery_address = serper_discovery_address(bucket=bucket, item=item)
             if not candidate_filter(
                 url=link,
                 name=title,
@@ -4410,8 +4491,10 @@ def discover_places_with_serper(
                     "ocena": "",
                     "liczba_opinii": "",
                     "kategoria": term,
-                    "adres": snippet,
-                    "full_address": snippet,
+                    "adres": discovery_address,
+                    "full_address": discovery_address,
+                    "serper_title": title,
+                    "serper_snippet": snippet,
                     "page_snippet": f"{title} {snippet}".strip(),
                     "status": "",
                     "telefon": item.get("phoneNumber") or item.get("phone") or "",
@@ -5052,7 +5135,7 @@ def generate_email_content(
             **(CUSTOM_EMAIL_CONTEXT or {}),
             "city_name": (CUSTOM_EMAIL_CONTEXT or {}).get("city_name") or CUSTOM_EMAIL_CITY,
             "delivery_address": (CUSTOM_EMAIL_CONTEXT or {}).get("delivery_address")
-            or DELIVERY_ADDRESS_UA,
+            or DELIVERY_ADDRESS_PL,
         },
         on_step=console_step,
     )

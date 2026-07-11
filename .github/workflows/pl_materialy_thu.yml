@@ -14,7 +14,7 @@ on:
         type: string
 
 permissions:
-  actions: write
+  actions: read
   contents: read
 
 concurrency:
@@ -80,9 +80,3 @@ jobs:
           path: |
             Wyniki/
             wyslane/
-
-      - name: Chain — sync Google Drive UA
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/gha_chain_workflow.sh "Sync wyniki Google Drive PL"

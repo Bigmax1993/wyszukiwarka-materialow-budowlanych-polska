@@ -10,15 +10,17 @@ Zmienne:
   GDRIVE_FOLDER_ID — docelowy folder (domyślnie GU Bauunternehmen)
   GDRIVE_SHARED_DRIVE_ID — opcjonalnie ID dysku współdzielonego (auto-wykrywanie, jeśli puste)
   GDRIVE_IMPERSONATE_EMAIL — opcjonalnie e-mail użytkownika Workspace (domain-wide delegation)
-  GDRIVE_VERSION_XLSX — 1 (domyślnie): każdy .xlsx jako nowy plik z datą, bez nadpisywania
+  GDRIVE_VERSION_XLSX — 0 (domyślnie): jeden plik .xlsx, nadpisywanie po merge (append wierszy)
+  GDRIVE_APPEND_XLSX — 1 (domyślnie): przed uploadem scala lokalny Excel z plikiem na Drive
 """
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import mimetypes
 import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -50,7 +52,12 @@ _GU_FOLDER_NAME = "GU Bauunternehmen Wyniki"
 
 
 def _gdrive_version_xlsx_enabled() -> bool:
-    raw = (os.environ.get("GDRIVE_VERSION_XLSX") or "1").strip().lower()
+    raw = (os.environ.get("GDRIVE_VERSION_XLSX") or "0").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _gdrive_append_xlsx_enabled() -> bool:
+    raw = (os.environ.get("GDRIVE_APPEND_XLSX") or "1").strip().lower()
     return raw not in ("0", "false", "no", "off")
 
 
@@ -342,20 +349,100 @@ def _upload_file(
     return created["id"]
 
 
+def _find_drive_file_by_name(service, parent_id: str, name: str) -> dict | None:
+    safe_name = name.replace("'", "\\'")
+    q = f"'{parent_id}' in parents and name = '{safe_name}' and trashed = false"
+    res = (
+        service.files()
+        .list(q=q, fields="files(id,name)", pageSize=1, corpora="allDrives", **_LIST_OPTS)
+        .execute()
+    )
+    files = res.get("files") or []
+    return files[0] if files else None
+
+
+def _download_drive_file(service, file_id: str, dest: Path) -> None:
+    from googleapiclient.http import MediaIoBaseDownload
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    request = service.files().get_media(fileId=file_id, **_DRIVE_API_OPTS)
+    with open(dest, "wb") as handle:
+        downloader = MediaIoBaseDownload(handle, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+
+def append_kontakte_xlsx_from_drive(
+    service,
+    local_xlsx: Path,
+    drive_parent_id: str,
+    *,
+    campaign: str,
+    logger: logging.Logger,
+) -> int:
+    """
+    Pobiera istniejący plik *_kontakte.xlsx z Drive, scala wiersze (append po URL)
+    i zapisuje z powrotem lokalnie przed uploadem.
+    """
+    if not _gdrive_append_xlsx_enabled():
+        return 0
+    if campaign != "pl" or local_xlsx.suffix.lower() != ".xlsx":
+        return 0
+    if not local_xlsx.is_file():
+        return 0
+
+    remote = _find_drive_file_by_name(service, drive_parent_id, local_xlsx.name)
+    if not remote:
+        print(f"Drive append: brak {local_xlsx.name} — pierwszy upload")
+        return 0
+
+    import pl_materialy_scraper as scraper
+
+    with tempfile.TemporaryDirectory(prefix="gdrive-append-") as tmp:
+        remote_path = Path(tmp) / local_xlsx.name
+        _download_drive_file(service, remote["id"], remote_path)
+        drive_rows, _ = scraper.load_existing_output(remote_path, logger)
+        local_rows, _ = scraper.load_existing_output(local_xlsx, logger)
+        merged = scraper.merge_pipeline_rows(drive_rows, local_rows)
+        added = max(0, len(merged) - len(drive_rows))
+        cache = scraper.load_cache(logger)
+        scraper.save_excel(merged, local_xlsx, logger, cache=cache)
+        print(
+            f"Drive append: {local_xlsx.name} "
+            f"Drive={len(drive_rows)} + lokalne={len(local_rows)} "
+            f"→ {len(merged)} (+{added} nowych wierszy)"
+        )
+        return added
+
+
+def merge_wyniki_xlsx_from_drive(
+    service,
+    wyniki: Path,
+    drive_parent_id: str,
+    *,
+    campaign: str,
+    logger: logging.Logger,
+) -> None:
+    """Scala wszystkie pliki *_kontakte.xlsx z folderu Wyniki/ z wersją na Drive."""
+    if not wyniki.is_dir():
+        return
+    for path in sorted(wyniki.glob("*_kontakte.xlsx")):
+        append_kontakte_xlsx_from_drive(
+            service,
+            path,
+            drive_parent_id,
+            campaign=campaign,
+            logger=logger,
+        )
+
+
 def upload_files_flat(service, MediaFileUpload, local_dir: Path, drive_parent_id: str) -> int:
     if not local_dir.is_dir():
         return 0
     count = 0
     for p in sorted(local_dir.iterdir()):
         if not p.is_file():
-            continue
-        if p.suffix.lower() == ".xlsx" and _gdrive_version_xlsx_enabled():
-            dated = versioned_xlsx_upload_name(p.name)
-            _upload_file(service, MediaFileUpload, p, drive_parent_id, version_xlsx=True)
-            print(f"  OK {dated}")
-            _upload_file(service, MediaFileUpload, p, drive_parent_id, version_xlsx=False)
-            print(f"  OK {p.name} (aktualny)")
-            count += 1
             continue
         _upload_file(service, MediaFileUpload, p, drive_parent_id)
         print(f"  OK {p.name}")
@@ -372,13 +459,8 @@ def upload_folder_named(
     count = 0
     for p in sorted(local_dir.iterdir()):
         if p.is_file():
-            uploaded_as = (
-                versioned_xlsx_upload_name(p.name)
-                if _gdrive_version_xlsx_enabled() and p.suffix.lower() == ".xlsx"
-                else p.name
-            )
             _upload_file(service, MediaFileUpload, p, sub_id)
-            print(f"  OK {drive_name}/{uploaded_as}")
+            print(f"  OK {drive_name}/{p.name}")
             count += 1
     return count
 
@@ -419,10 +501,18 @@ def main() -> int:
     service, MediaFileUpload = _drive_service(creds)
     data_root = resolve_data_root(args.campaign_dir, campaign=args.campaign)
     upload_folder_id = _resolve_upload_folder(service, folder_id, use_oauth=use_oauth)
+    logger = logging.getLogger("gdrive_upload")
 
     total = 0
     w = wyniki_dir(data_root)
     if w.is_dir():
+        merge_wyniki_xlsx_from_drive(
+            service,
+            w,
+            upload_folder_id,
+            campaign=args.campaign,
+            logger=logger,
+        )
         print(f"Upload plikow z {w} -> Drive {upload_folder_id}")
         total += upload_files_flat(service, MediaFileUpload, w, upload_folder_id)
     s = wyslane_dir(data_root)

@@ -212,23 +212,23 @@ def build_row_cleanup_prompt(
     handelsketten: str = "",
     url: str = "",
 ) -> str:
-    return f"""РОЛЬ
-Ти готуєш рядок Excel для B2B-бази постачальників будматеріалів в Polskі.
-Відповідай ЛИШЕ JSON.
+    return f"""ROLA
+Przygotowujesz wiersz Excel dla bazy B2B hurtowni / dostawców materiałów budowlanych w Polsce.
+Odpowiedz WYŁĄCZNIE JSON.
 
-СХЕМА
+SCHEMAT
 {{"company_name_clean":"","address":"","phone":"","website":"","bundesland":"","handelsketten":"","url":""}}
 
-ПРАВИЛА
-• company_name_clean — офіційна назва + форма (ТОВ, ПП, ФОП) або ""
-• address — адреса в Polskі або ""
-• phone — один номер UA (+380 або 0…) або ""
-• website — https://domain (корінь) або ""
-• bundesland — один з: [{states}] або ""
-• handelsketten — категорії матеріалів (cement, piasek, …) через кому або ""
-• url — як website
+ZASADY
+• company_name_clean — oficjalna nazwa firmy + forma prawna (Sp. z o.o., sp.j., S.A.) albo krótka nazwa handlowa z Impressum; NIE tytuł SEO strony, NIE nagłówek sekcji (np. „Biuro obsługi klienta”, „Artykuły sezonowe”); jeśli brak pewności — ""
+• address — WYŁĄCZNIE fizyczny adres siedziby / składu w Polsce (ulica + kod XX-XXX + miasto); NIE opis oferty, NIE tekst marketingowy; jeśli brak — ""
+• phone — jeden numer PL (+48 lub 9 cyfr krajowych) albo ""
+• website — https://domena (korzeń) albo ""
+• bundesland — jedno z województw: [{states}] albo ""
+• handelsketten — kategorie materiałów (cement, piasek, …) przez przecinek albo ""
+• url — jak website
 
-ВХІД
+WEJŚCIE
 company={company!r}
 address={address!r}
 phone={phone!r}

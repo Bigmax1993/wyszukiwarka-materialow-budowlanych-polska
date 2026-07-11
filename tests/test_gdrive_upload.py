@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 from scripts.gdrive_upload_wyniki import (  # noqa: E402
     _gdrive_append_xlsx_enabled,
     _gdrive_version_xlsx_enabled,
+    _skip_gdrive_upload,
     versioned_xlsx_upload_name,
 )
 
@@ -33,6 +34,17 @@ class GdriveUploadDefaultsTest(unittest.TestCase):
         finally:
             if env is not None:
                 os.environ["GDRIVE_APPEND_XLSX"] = env
+
+
+class GdriveSkipUploadTest(unittest.TestCase):
+    def test_skip_json_and_log(self):
+        self.assertTrue(_skip_gdrive_upload(Path("pl_materialy_cache.json")))
+        self.assertTrue(_skip_gdrive_upload(Path("pl_materialy_scraper.log")))
+        self.assertTrue(_skip_gdrive_upload(Path("pl_materialy_wojewodztwo_rotation.JSON")))
+
+    def test_upload_xlsx_and_eml(self):
+        self.assertFalse(_skip_gdrive_upload(Path("pl_materialy_kontakte.xlsx")))
+        self.assertFalse(_skip_gdrive_upload(Path("wyslane/mail.eml")))
 
 
 class GdriveVersionedXlsxTest(unittest.TestCase):

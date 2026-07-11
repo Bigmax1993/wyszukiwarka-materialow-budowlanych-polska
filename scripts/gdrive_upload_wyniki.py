@@ -12,6 +12,9 @@ Zmienne:
   GDRIVE_IMPERSONATE_EMAIL — opcjonalnie e-mail użytkownika Workspace (domain-wide delegation)
   GDRIVE_VERSION_XLSX — 0 (domyślnie): jeden plik .xlsx, nadpisywanie po merge (append wierszy)
   GDRIVE_APPEND_XLSX — 1 (domyślnie): przed uploadem scala lokalny Excel z plikiem na Drive
+
+Na Google Drive trafia tylko Excel (i opcjonalnie wyslane/*.eml).
+Pliki .json i .log pozostają wyłącznie w artefaktach GitHub Actions.
 """
 from __future__ import annotations
 
@@ -49,6 +52,13 @@ _LIST_OPTS = {
 }
 
 _GU_FOLDER_NAME = "GU Bauunternehmen Wyniki"
+
+# Cache, logi i stan rotacji — tylko artefakty GitHub, nie Drive.
+_GDRIVE_SKIP_SUFFIXES = frozenset({".json", ".log"})
+
+
+def _skip_gdrive_upload(path: Path) -> bool:
+    return path.suffix.lower() in _GDRIVE_SKIP_SUFFIXES
 
 
 def _gdrive_version_xlsx_enabled() -> bool:
@@ -444,6 +454,9 @@ def upload_files_flat(service, MediaFileUpload, local_dir: Path, drive_parent_id
     for p in sorted(local_dir.iterdir()):
         if not p.is_file():
             continue
+        if _skip_gdrive_upload(p):
+            print(f"  SKIP {p.name} (tylko GitHub artefakt)")
+            continue
         _upload_file(service, MediaFileUpload, p, drive_parent_id)
         print(f"  OK {p.name}")
         count += 1
@@ -458,10 +471,14 @@ def upload_folder_named(
     sub_id = _find_or_create_folder(service, drive_parent_id, drive_name)
     count = 0
     for p in sorted(local_dir.iterdir()):
-        if p.is_file():
-            _upload_file(service, MediaFileUpload, p, sub_id)
-            print(f"  OK {drive_name}/{p.name}")
-            count += 1
+        if not p.is_file():
+            continue
+        if _skip_gdrive_upload(p):
+            print(f"  SKIP {drive_name}/{p.name} (tylko GitHub artefakt)")
+            continue
+        _upload_file(service, MediaFileUpload, p, sub_id)
+        print(f"  OK {drive_name}/{p.name}")
+        count += 1
     return count
 
 

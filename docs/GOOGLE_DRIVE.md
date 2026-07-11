@@ -8,13 +8,13 @@ Folder w chmurze: [PL Materialy Budowlane](https://drive.google.com/drive/folder
 |--------|------|
 | `GDRIVE_FOLDER_ID_PL` | ID folderu Drive (`1O15CdN0TH8rx74sPP5C1GuYSweX81IGw`) |
 
-| Plik / folder | Opis |
-|---------------|------|
-| `pl_materialy_cache.json` | Cache (wersja `pl_enrichment_v2`) |
-| `pl_materialy_kontakte.xlsx` | Excel kontaktów (jeden plik — append wierszy, bez kopii z datą) |
-| `pl_materialy_scraper.log` | Log |
-| `pl_materialy_wojewodztwo_rotation.json` | Stan rotacji województw |
-| `wyslane/*.eml` | Kopie wysłanych maili |
+| Plik / folder | Gdzie |
+|---------------|--------|
+| `pl_materialy_kontakte.xlsx` | **Google Drive** (jeden plik — append wierszy, bez kopii z datą) |
+| `wyslane/*.eml` | **Google Drive** (kopie wysłanych maili) |
+| `pl_materialy_cache.json` | **GitHub Actions** (artefakt `pl-materialy-wyniki-*`) |
+| `pl_materialy_scraper.log` | **GitHub Actions** (artefakt) |
+| `pl_materialy_wojewodztwo_rotation.json` | **GitHub Actions** (artefakt) |
 
 | Sposób | Kiedy |
 |--------|--------|

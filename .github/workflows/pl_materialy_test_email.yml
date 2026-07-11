@@ -1,0 +1,46 @@
+name: PL test email (jednorazowo)
+
+on:
+  workflow_dispatch:
+    inputs:
+      to_email:
+        description: "Adres odbiorcy testowego maila"
+        required: true
+        type: string
+        default: "svinchak1993@gmail.com"
+      company_name:
+        description: "Nazwa firmy do personalizacji (Claude)"
+        required: false
+        type: string
+        default: "Test Bud Sp. z o.o."
+
+permissions:
+  contents: read
+
+env:
+  SCRAPER_TIMEZONE: Europe/Warsaw
+  CLAUDE_UNLIMITED: "1"
+  KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+  SMTP_HOST: ragakomputer.home.pl
+  SMTP_PORT: "465"
+  SMTP_SSL: "1"
+
+jobs:
+  send-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      MAIL_USER: ${{ secrets.MAIL_USER }}
+      MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+      MAIL_SENDER_NAME: ${{ secrets.MAIL_SENDER_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-scraper
+
+      - name: Send test email
+        run: |
+          python scripts/send_test_email_pl.py \
+            --to "${{ inputs.to_email }}" \
+            --company "${{ inputs.company_name }}"

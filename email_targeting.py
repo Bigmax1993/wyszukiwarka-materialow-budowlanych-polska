@@ -47,6 +47,63 @@ AGGREGATOR_EMAIL_DOMAINS = frozenset(
     }
 )
 
+# Portale ogłoszeniowe / social / katalogi — nie zapisuj do cache JSON ani Excela.
+PUBLIC_PORTAL_DOMAINS_EXACT = frozenset(
+    {
+        "facebook.com",
+        "fb.com",
+        "instagram.com",
+        "linkedin.com",
+        "xing.com",
+        "youtube.com",
+        "youtu.be",
+        "twitter.com",
+        "x.com",
+        "tiktok.com",
+        "pinterest.com",
+        "wikipedia.org",
+        "google.com",
+        "maps.google.com",
+        "lento.pl",
+        "olx.pl",
+        "allegro.pl",
+        "gratka.pl",
+        "otodom.pl",
+        "gumtree.pl",
+        "sprzedajemy.pl",
+        "oglaszamy24.pl",
+        "otomoto.pl",
+        "panoramafirm.pl",
+        "pkt.pl",
+        "tupalo.pl",
+        "hotfrog.pl",
+        "firmy.net",
+        "gowork.pl",
+        "pracuj.pl",
+        "nofluffjobs.com",
+    }
+)
+
+PUBLIC_PORTAL_DOMAIN_SUFFIXES = (
+    ".facebook.com",
+    ".lento.pl",
+    ".olx.pl",
+    ".allegro.pl",
+    ".gratka.pl",
+    ".otodom.pl",
+)
+
+PUBLIC_PORTAL_DOMAIN_MARKERS = (
+    "gelbeseiten.",
+    "firmenabc.",
+    "yellowpages.",
+    "panorama-firm",
+    "pkt.pl",
+    "oferteo.pl",
+    "fixly.pl",
+    "fixly.com",
+)
+
 _UNSUITABLE_LOCAL_MARKERS = (
     "ochrona",
     "rodo",
@@ -99,6 +156,22 @@ def get_registrable_domain(url: str) -> str:
         return netloc
     except Exception:
         return ""
+
+
+def is_public_portal_url(url: str) -> bool:
+    """True = portal ogłoszeń / social / katalog — pomijaj w discovery i cache JSON."""
+    host = get_registrable_domain(url or "")
+    if not host:
+        return False
+    if host in PUBLIC_PORTAL_DOMAINS_EXACT:
+        return True
+    if host in AGGREGATOR_EMAIL_DOMAINS:
+        return True
+    if any(host.endswith(suffix) for suffix in PUBLIC_PORTAL_DOMAIN_SUFFIXES):
+        return True
+    if any(marker in host for marker in PUBLIC_PORTAL_DOMAIN_MARKERS):
+        return True
+    return False
 
 
 def _fold_domain_token(value: str) -> str:

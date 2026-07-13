@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
+from email_targeting import is_public_portal_url
+
 # Nazwy / fragmenty (znormalizowane dopasowanie substring)
 EXCLUDED_NAME_MARKERS: tuple[str, ...] = (
     "action deutschland",
@@ -212,6 +214,9 @@ def is_excluded_kontrahent(
 def contact_info_excluded(info: dict | None, place_url: str = "") -> bool:
     if not isinstance(info, dict):
         return False
+    url = (place_url or info.get("official_website") or "").strip()
+    if is_public_portal_url(url):
+        return True
     email = (info.get("email_target") or "").strip()
     if not email and info.get("emails_found"):
         email = str(info.get("emails_found")).split(",")[0].strip()

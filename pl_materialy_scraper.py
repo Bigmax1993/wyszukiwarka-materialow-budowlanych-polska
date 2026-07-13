@@ -226,6 +226,7 @@ from email_targeting import (
     AGGREGATOR_EMAIL_DOMAINS,
     MIN_EMAIL_SCORE_FOR_SEND,
     get_registrable_domain,
+    is_public_portal_url,
     is_unsuitable_inquiry_email,
     pick_best_email_for_inquiry,
     pick_best_email_from_website_scrape,
@@ -347,6 +348,11 @@ SERPER_BAD_DOMAINS = [
     "facebook.com",
     "instagram.com",
     "linkedin.com",
+    "lento.pl",
+    "olx.pl",
+    "allegro.pl",
+    "gratka.pl",
+    "otodom.pl",
     "gelbeseiten.",
     "11880.com",
     "11880.",
@@ -1798,6 +1804,9 @@ def row_from_cache_contact(place_url: str, info: dict) -> dict | None:
     """Jeden rekord contacts JSON → wiersz pipeline (także bez e-mail)."""
     if not isinstance(info, dict):
         return None
+    website = (place_url or info.get("official_website") or "").strip()
+    if is_public_portal_url(website):
+        return None
     name = (
         info.get("company_name_clean")
         or info.get("company_name")
@@ -1968,7 +1977,11 @@ def purge_institutions_from_cache(
     for place_url in list(contacts.keys()):
         info = contacts.get(place_url)
         if (
-            contact_info_excluded(info, place_url)
+            is_public_portal_url(place_url)
+            or is_public_portal_url(
+                (info or {}).get("official_website") if isinstance(info, dict) else ""
+            )
+            or contact_info_excluded(info, place_url)
             or is_cache_contact_institution(place_url, info)
             or is_cache_contact_not_store_builder(place_url, info)
         ):
@@ -1988,6 +2001,25 @@ def purge_institutions_from_cache(
         for key in list(serper.keys()):
             if is_cache_serper_entry_institution(serper.get(key)):
                 serper.pop(key, None)
+
+    serper_discovery = cache.get("serper_discovery") or {}
+    if isinstance(serper_discovery, dict):
+        for key, entry in list(serper_discovery.items()):
+            if not isinstance(entry, dict):
+                continue
+            rows = entry.get("rows") or []
+            if not isinstance(rows, list):
+                continue
+            kept = [
+                r
+                for r in rows
+                if isinstance(r, dict)
+                and not is_public_portal_url((r.get("url") or r.get("www") or ""))
+            ]
+            if kept:
+                entry["rows"] = kept
+            else:
+                serper_discovery.pop(key, None)
 
     for url in removed_urls:
         for bucket in (
@@ -2124,7 +2156,7 @@ def sync_pipeline_rows_to_contacts_cache(all_rows: list[dict], cache: dict) -> i
     synced = 0
     for row in all_rows:
         url = (row.get("url") or row.get("www") or "").strip()
-        if not url:
+        if not url or is_public_portal_url(url):
             continue
         info = dict(contacts.get(url) or {})
         patch = pipeline_row_to_contact_info(row)
@@ -2672,8 +2704,13 @@ def store_serper_discovery_rows(
 ) -> None:
     sd = cache.setdefault("serper_discovery", {})
     key = _serper_discovery_cache_key(query, use_places_endpoint=use_places_endpoint)
-    if rows:
-        sd[key] = {"rows": rows, "at": datetime.now().isoformat()}
+    filtered_rows = [
+        r
+        for r in (rows or [])
+        if not is_public_portal_url((r.get("url") or r.get("www") or ""))
+    ]
+    if filtered_rows:
+        sd[key] = {"rows": filtered_rows, "at": datetime.now().isoformat()}
     else:
         sd[key] = {"empty": True, "at": datetime.now().isoformat(), "rows": []}
 
@@ -4392,7 +4429,11 @@ def discover_places_with_serper(
     )
     if cached_rows is not None:
         console_step(f"Serper Discovery Cache: {query} ({len(cached_rows)})")
-        return [dict(r) for r in cached_rows]
+        return [
+            dict(r)
+            for r in cached_rows
+            if not is_public_portal_url((r.get("url") or r.get("www") or ""))
+        ]
 
     api_key = get_serper_api_key()
     if not api_key:
@@ -4446,6 +4487,10 @@ def discover_places_with_serper(
                 funnel["raw_hits"] = funnel.get("raw_hits", 0) + 1
             link = normalize_website(item.get("link") or item.get("website") or "")
             if not link or link in seen:
+                continue
+            if is_public_portal_url(link):
+                if funnel is not None:
+                    funnel["filtered_serper"] = funnel.get("filtered_serper", 0) + 1
                 continue
             if not is_germany_de_candidate(
                 link, item.get("title", ""), item.get("snippet", "")
@@ -5673,6 +5718,10 @@ def _process_serper_terms(
             dom = get_registrable_domain(raw_url)
             base_url = website_base_url(raw_url)
             url = base_url or raw_url
+            if is_public_portal_url(url):
+                if funnel is not None:
+                    funnel["filtered_serper"] = funnel.get("filtered_serper", 0) + 1
+                continue
             r["url"] = url
             r["www"] = url
             if discovery_bundesland:

@@ -28,6 +28,7 @@ jobs:
           python -m py_compile kanbud_bootstrap.py
           python -m py_compile campaign_data_paths.py
           python -m py_compile pl_materialy_scraper.py
+          python -m py_compile pl_sync_replies_and_reminders.py
           python -m py_compile pl_wojewodztwo_keywords.py
           python -m py_compile pl_materialy_inquiry_email_pl.py
           python -m py_compile pl_claude_prompts.py
@@ -42,5 +43,6 @@ jobs:
           python -m pytest \
             tests/test_pl_inquiry_email_pl.py \
             tests/test_pl_materialy_integration.py \
+            tests/test_pl_reminder_email.py \
             tests/test_repo_isolation.py \
             -q

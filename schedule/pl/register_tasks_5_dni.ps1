@@ -25,13 +25,22 @@ $tasks = @(
     @{ Name = "Kanbud_PL_Wtorek_Send"; Script = Join-Path $ScheduleDir "run_wtorek_send.ps1"; Day = "Tuesday"; Time = "14:00" }
 )
 
+$reminderScript = Join-Path $ScheduleDir "run_sync_replies_reminders.ps1"
+$reminderAction = New-ScheduledTaskAction -Execute $Pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$reminderScript`" --send"
+$reminderTrigger = New-ScheduledTaskTrigger -Daily -DaysInterval 3 -At "10:00"
+$reminderSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
 if ($Unregister) {
     foreach ($t in $tasks) {
         Unregister-ScheduledTask -TaskName $t.Name -Confirm:$false -ErrorAction SilentlyContinue
         Write-Host "Usunieto: $($t.Name)"
     }
+    Unregister-ScheduledTask -TaskName "Kanbud_PL_Sync_Replies_Reminders" -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Host "Usunieto: Kanbud_PL_Sync_Replies_Reminders"
     exit 0
 }
 
 foreach ($t in $tasks) { Register-WeekdayTask @t }
+Register-ScheduledTask -TaskName "Kanbud_PL_Sync_Replies_Reminders" -Action $reminderAction -Trigger $reminderTrigger -Settings $reminderSettings -Force | Out-Null
+Write-Host "OK: Kanbud_PL_Sync_Replies_Reminders -> co 3 dni 10:00 (--send)"
 Write-Host "Gotowe. Sprawdz taskschd.msc (Kanbud_PL_*)"

@@ -40,6 +40,8 @@ jobs:
 
       - name: Install Google Drive dependencies
         run: pip install -r requirements-drive.txt
+
+      - name: Resolve source artifact
         id: artifact_run
         env:
           GH_TOKEN: ${{ github.token }}

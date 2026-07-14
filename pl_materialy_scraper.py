@@ -6083,13 +6083,13 @@ def run_scraper(
                 f"Excel aus Cache neu: 0 Zeilen (contacts={contacts_n}, pusty Excel)"
             )
         if REQUIRE_HTTPS_WEBSITE and all_rows:
-            all_rows, https_marked = annotate_insecure_website_rows(
+            all_rows, https_dropped = annotate_insecure_website_rows(
                 all_rows, cache, logger
             )
-            if https_marked:
+            if https_dropped:
                 console_step(
-                    f"HTTPS filter rebuild: oznaczono {https_marked} wierszy "
-                    f"jako {SKIPPED_INSECURE_HTTP_REASON}"
+                    f"HTTPS filter rebuild: usunięto {https_dropped} wierszy "
+                    f"bez TLS ({SKIPPED_INSECURE_HTTP_REASON})"
                 )
         seen_global = build_discovery_seen_urls(all_rows, cache)
         persist_progress(all_rows, cache, logger, reason="rebuild_from_cache")

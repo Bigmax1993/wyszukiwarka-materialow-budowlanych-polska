@@ -76,12 +76,11 @@ class HttpsWebsiteGuardTests(unittest.TestCase):
         self.assertFalse(row_has_insecure_website_status(row))
 
     @patch("https_website_guard.is_secure_https_website", return_value=(False, "http_only_no_tls"))
-    def test_annotate_marks_insecure_rows(self, _mock_probe):
+    def test_annotate_drops_insecure_rows(self, _mock_probe):
         rows = [{"nazwa": "Alfa", "www": "http://alfa-norma.com.pl"}]
-        out, marked = annotate_insecure_website_rows(rows, {})
-        self.assertEqual(marked, 1)
-        self.assertEqual(out[0]["email_status"], SKIPPED_INSECURE_HTTP_REASON)
-        self.assertEqual(out[0]["verification_reason"], "http_only_no_tls")
+        out, dropped = annotate_insecure_website_rows(rows, {})
+        self.assertEqual(dropped, 1)
+        self.assertEqual(out, [])
 
 
 from requests.exceptions import SSLError  # noqa: E402

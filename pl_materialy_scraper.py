@@ -6083,8 +6083,9 @@ def run_scraper(
                 f"Excel aus Cache neu: 0 Zeilen (contacts={contacts_n}, pusty Excel)"
             )
         if REQUIRE_HTTPS_WEBSITE and all_rows:
+            cache.pop("https_probe", None)
             all_rows, https_dropped = annotate_insecure_website_rows(
-                all_rows, cache, logger
+                all_rows, None, logger
             )
             if https_dropped:
                 console_step(

@@ -233,6 +233,11 @@ from email_targeting import (
     rank_email_candidates,
     score_email_candidate,
 )
+from https_website_guard import (
+    SKIPPED_INSECURE_HTTP_REASON,
+    row_has_insecure_website_status,
+    is_secure_https_website,
+)
 
 import requests
 from bs4 import BeautifulSoup  # pyright: ignore[reportMissingModuleSource]
@@ -460,6 +465,7 @@ _retail_store_builder_filter.REQUIRE_GENERALUNTERNEHMER = REQUIRE_GENERALUNTERNE
 # Weryfikacja www: GU/Filialbau + Neubau/Umbau + obowiązkowy dowód projektów marketów
 REQUIRE_WEBSITE_RETAIL_VERIFICATION = True
 REQUIRE_WEBSITE_REFERENCES_OR_PORTFOLIO = False
+REQUIRE_HTTPS_WEBSITE = True
 REQUIRE_MARKET_PROJECTS_IN_PORTFOLIO = False
 # Tylko małe firmy (Kleinunternehmen) — duże koncerny odrzucane
 REQUIRE_SMALL_FIRM = False
@@ -1491,6 +1497,8 @@ def is_row_eligible_for_excel_export(row: dict) -> bool:
     name = (row.get("company_name_clean") or row.get("nazwa") or "").strip()
     url = (row.get("url") or row.get("www") or row.get("official_website") or "").strip()
     if name.lower() == "nieznana firma" and not url:
+        return False
+    if REQUIRE_HTTPS_WEBSITE and row_has_insecure_website_status(row):
         return False
     email = (row.get("email_target") or "").strip()
     text = _row_chain_context_text(row)
@@ -5410,6 +5418,54 @@ def _process_email_jobs(
     persist_progress(all_rows, cache, logger, reason="nach Mailversand")
 
 
+def _reject_insecure_website_row(
+    row: dict,
+    website: str,
+    *,
+    logger: logging.Logger,
+    cache: dict,
+    contacts_cache: dict,
+    place_url: str,
+) -> dict | None:
+    """None = HTTPS OK; inaczej wiersz oznaczony jako skipped_insecure_http."""
+    if not REQUIRE_HTTPS_WEBSITE or not (website or "").strip():
+        return None
+    secure, reason = is_secure_https_website(website, logger=logger, cache=cache)
+    if secure:
+        return None
+    label = (
+        row.get("company_name_clean")
+        or row.get("nazwa")
+        or row.get("company_name")
+        or website
+    )
+    console_step(f"Odrzucono (brak HTTPS): {label} — {reason}")
+    skip = {
+        "emails": [],
+        "phones": [],
+        "website": website,
+        "source_urls": [],
+        "page_snippet": "",
+    }
+    row = reconcile_contact_sources(row, skip)
+    extra = {
+        "company_name": label,
+        "official_website": website,
+        "retail_verified": False,
+        "verification_reason": reason,
+        "retail_chains_found": "",
+        "is_small_firm": False,
+        "is_gu": False,
+        "gu_marker": "",
+        "email_target": "",
+        "email_status": SKIPPED_INSECURE_HTTP_REASON,
+    }
+    row.update(extra)
+    if place_url:
+        contacts_cache[place_url] = {k: row.get(k) for k in extra if k in row}
+    return normalize_row_company_name(row)
+
+
 def enrich_row_with_contacts(
     row: dict,
     cache: dict,
@@ -5460,6 +5516,17 @@ def enrich_row_with_contacts(
         str(row.get(k) or "")
         for k in ("nazwa", "kategoria", "www", "url", "full_address", "adres")
     )
+
+    rejected = _reject_insecure_website_row(
+        row,
+        website,
+        logger=logger,
+        cache=cache,
+        contacts_cache=contacts_cache,
+        place_url=place_url,
+    )
+    if rejected is not None:
+        return rejected
 
     verification = {
         "verified": False,
@@ -5728,6 +5795,19 @@ def _process_serper_terms(
                 r["discovery_bundesland"] = discovery_bundesland
                 if not (r.get("bundesland") or "").strip():
                     r["bundesland"] = discovery_bundesland
+            if REQUIRE_HTTPS_WEBSITE:
+                secure, https_reason = is_secure_https_website(
+                    url, logger=logger, cache=cache
+                )
+                if not secure:
+                    console_step(
+                        f"Übersprungen (brak HTTPS): {r.get('nazwa', '')} — {https_reason}"
+                    )
+                    if funnel is not None:
+                        funnel["filtered_insecure_http"] = (
+                            funnel.get("filtered_insecure_http", 0) + 1
+                        )
+                    continue
             existing = by_url.get(url) or (by_domain.get(dom) if dom else None)
             if existing and not DISCOVERY_IGNORE_CONTACT_CACHE and url in seen_global:
                 continue
@@ -6496,6 +6576,17 @@ def _run_smoke_tests() -> None:
     assert len(SERPER_DISCOVERY_LANDKREIS_TERMS) >= 5
     assert len(SERPER_DISCOVERY_PLACES_TERMS) >= 5
     assert REQUIRE_GENERALUNTERNEHMER is True
+    assert REQUIRE_HTTPS_WEBSITE is True
+    assert SKIPPED_INSECURE_HTTP_REASON == "skipped_insecure_http"
+    assert not is_row_eligible_for_excel_export(
+        {
+            "nazwa": "Alfa Norma",
+            "url": "http://alfa-norma.com.pl",
+            "email_status": SKIPPED_INSECURE_HTTP_REASON,
+            "retail_verified": True,
+            "is_gu": True,
+        }
+    )
     assert PENDING_WWW_VERIFY_REASON == "pending_www_verify"
     assert MIN_VERIFIED_CONTACTS_ROTATION == 20
     assert DISCOVERY_MIN_PENDING_GHA_FAIL == 5

@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 from https_website_guard import (  # noqa: E402
     SKIPPED_INSECURE_HTTP_REASON,
+    annotate_insecure_website_rows,
     is_explicit_http_website,
     is_secure_https_website,
     row_has_insecure_website_status,
@@ -73,6 +74,14 @@ class HttpsWebsiteGuardTests(unittest.TestCase):
     def test_row_secure_without_status(self):
         row = {"www": "https://x.pl", "verification_reason": "ok"}
         self.assertFalse(row_has_insecure_website_status(row))
+
+    @patch("https_website_guard.is_secure_https_website", return_value=(False, "http_only_no_tls"))
+    def test_annotate_marks_insecure_rows(self, _mock_probe):
+        rows = [{"nazwa": "Alfa", "www": "http://alfa-norma.com.pl"}]
+        out, marked = annotate_insecure_website_rows(rows, {})
+        self.assertEqual(marked, 1)
+        self.assertEqual(out[0]["email_status"], SKIPPED_INSECURE_HTTP_REASON)
+        self.assertEqual(out[0]["verification_reason"], "http_only_no_tls")
 
 
 from requests.exceptions import SSLError  # noqa: E402

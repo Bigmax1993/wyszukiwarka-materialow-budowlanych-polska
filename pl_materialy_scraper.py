@@ -235,6 +235,7 @@ from email_targeting import (
 )
 from https_website_guard import (
     SKIPPED_INSECURE_HTTP_REASON,
+    annotate_insecure_website_rows,
     row_has_insecure_website_status,
     is_secure_https_website,
 )
@@ -6081,6 +6082,15 @@ def run_scraper(
             console_step(
                 f"Excel aus Cache neu: 0 Zeilen (contacts={contacts_n}, pusty Excel)"
             )
+        if REQUIRE_HTTPS_WEBSITE and all_rows:
+            all_rows, https_marked = annotate_insecure_website_rows(
+                all_rows, cache, logger
+            )
+            if https_marked:
+                console_step(
+                    f"HTTPS filter rebuild: oznaczono {https_marked} wierszy "
+                    f"jako {SKIPPED_INSECURE_HTTP_REASON}"
+                )
         seen_global = build_discovery_seen_urls(all_rows, cache)
         persist_progress(all_rows, cache, logger, reason="rebuild_from_cache")
     else:

@@ -183,6 +183,42 @@ def row_has_insecure_website_status(row: dict) -> bool:
     return (row.get("verification_reason") or "").strip() in _INSECURE_HTTPS_REASONS
 
 
+def annotate_insecure_website_rows(
+    rows: list[dict],
+    cache: dict | None,
+    logger: logging.Logger | None = None,
+) -> tuple[list[dict], int]:
+    """
+    Przy rebuild Excela: sonduje HTTPS dla wierszy bez statusu i oznacza
+    skipped_insecure_http (nie trafią do arkusza Kontakte).
+    """
+    marked = 0
+    for row in rows:
+        if row_has_insecure_website_status(row):
+            continue
+        website = row_website_url(row)
+        if not website:
+            continue
+        secure, reason = is_secure_https_website(
+            website, logger=logger, cache=cache
+        )
+        if secure:
+            continue
+        row["email_status"] = SKIPPED_INSECURE_HTTP_REASON
+        row["verification_reason"] = reason
+        row["retail_verified"] = False
+        row["email_target"] = ""
+        marked += 1
+        if logger:
+            label = (
+                row.get("company_name_clean")
+                or row.get("nazwa")
+                or website
+            )
+            logger.info("HTTPS filter rebuild: odrzucono %s (%s)", label, reason)
+    return rows, marked
+
+
 def is_row_insecure_website(row: dict, *, cache: dict | None = None) -> bool:
     if row_has_insecure_website_status(row):
         return True

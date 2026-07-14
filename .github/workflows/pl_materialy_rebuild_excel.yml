@@ -1,0 +1,109 @@
+name: PL rebuild Excel
+
+# Przebudowa pl_materialy_kontakte.xlsx z cache + filtr HTTPS; upload na Drive.
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_name:
+        description: "Artefakt zrodlowy (domyslnie najnowszy thu/mon/tue/fri/pi)"
+        required: false
+        type: string
+      upload_drive:
+        description: "Wgraj Wyniki na Google Drive po rebuild"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: pl-pipeline
+  cancel-in-progress: false
+
+env:
+  SCRAPER_TIMEZONE: Europe/Warsaw
+  KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+  GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
+  GDRIVE_VERSION_XLSX: "0"
+  GDRIVE_APPEND_XLSX: "1"
+
+jobs:
+  rebuild-excel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-scraper
+
+      - name: Install Google Drive dependencies
+        run: pip install -r requirements-drive.txt
+        id: artifact_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FORCED="${{ github.event.inputs.artifact_name }}"
+          ALL=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
+            --paginate --jq '.artifacts[] | select(.expired==false)')
+          pick_latest() {
+            local name="$1"
+            echo "$ALL" | jq -s --arg n "$name" \
+              '[.[] | select(.name == $n)] | sort_by(.created_at) | reverse | .[0] // empty'
+          }
+          PICK=""
+          if [ -n "$FORCED" ]; then
+            PICK=$(pick_latest "$FORCED")
+          else
+            for NAME in pl-materialy-wyniki-thu pl-materialy-wyniki-mon pl-materialy-wyniki-tue pl-materialy-wyniki-fri pl-materialy-wyniki-pi; do
+              CAND=$(pick_latest "$NAME")
+              if [ -n "$CAND" ] && [ "$CAND" != "null" ]; then
+                PICK="$CAND"
+                break
+              fi
+            done
+          fi
+          if [ -z "$PICK" ] || [ "$PICK" = "null" ]; then
+            echo "::error::Brak artefaktu Wyniki (thu/mon/tue/fri/pi)"
+            exit 1
+          fi
+          echo "artifact=$(echo "$PICK" | jq -r '.name')" >> "$GITHUB_OUTPUT"
+          echo "run-id=$(echo "$PICK" | jq -r '.workflow_run.id')" >> "$GITHUB_OUTPUT"
+          echo "Uzywam artefaktu: $(echo "$PICK" | jq -r '.name') z run $(echo "$PICK" | jq -r '.workflow_run.id')"
+
+      - name: Download Wyniki artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.artifact_run.outputs.artifact }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.artifact_run.outputs.run-id }}
+          path: .
+
+      - name: Rebuild Excel (cache + filtr HTTPS)
+        run: |
+          python pl_materialy_scraper.py \
+            --run-config run_config/pl_materialy.json \
+            --rebuild-from-cache
+
+      - name: Upload Wyniki artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pl-materialy-wyniki-rebuild
+          path: |
+            Wyniki/
+            wyslane/
+
+      - name: Upload Wyniki to Google Drive
+        if: always() && github.event.inputs.upload_drive != 'false'
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
+          GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
+          GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
+          GDRIVE_IMPERSONATE_EMAIL: ${{ secrets.GDRIVE_IMPERSONATE_EMAIL }}
+          GDRIVE_SHARED_DRIVE_ID: ${{ secrets.GDRIVE_SHARED_DRIVE_ID }}
+        run: |
+          mkdir -p Wyniki wyslane 2>/dev/null || true
+          python scripts/gdrive_upload_wyniki.py --campaign-dir . --campaign pl

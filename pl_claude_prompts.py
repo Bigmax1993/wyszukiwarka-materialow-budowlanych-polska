@@ -312,6 +312,60 @@ body: pełny list gotowy do wysyłki (plain text), łącznie z podpisem powyżej
 """
 
 
+def build_reminder_email_prompt_pl(
+    *,
+    company_name: str,
+    original_subject: str = "",
+    sent_date: str = "",
+    original_body_excerpt: str = "",
+    reminder_number: int = 1,
+) -> str:
+    excerpt = (original_body_excerpt or "").strip()
+    if len(excerpt) > 1200:
+        excerpt = excerpt[:1197] + "..."
+    tone = (
+        "delikatne, uprzejme przypomnienie (pierwsze)"
+        if reminder_number < 2
+        else "stanowcze, ale kulturalne drugie przypomnienie"
+    )
+    date_line = f"Data pierwszego maila: {sent_date}." if sent_date else ""
+    subj_line = f"Temat pierwszego maila: {original_subject}." if original_subject else ""
+    return f"""ROLA
+Piszesz krótki, NATURALNY mail przypominający po polsku — jak człowiek z branży budowlanej, nie bot.
+To follow-up B2B do hurtowni / dostawcy materiałów budowlanych, który nie odpowiedział na zapytanie.
+
+ODBIORCA
+Firma: {company_name}
+{date_line}
+{subj_line}
+
+KONTEKST (pierwszy mail — NIE wklejaj go ponownie, tylko odwołaj się ogólnie):
+{excerpt or "(brak treści — odwołaj się do zapytania ofertowego o materiały budowlane)"}
+
+ZADANIE
+Napisz WYŁĄCZNIE treść przypomnienia (bez podpisu, bez cytatu poprzedniego maila).
+• Ton: {tone}
+• 2–3 krótkie akapity oddzielone pustą linią (\\n\\n)
+• Zacznij od „Dzień dobry,” lub spersonalizowanego zwrotu do {company_name}
+• Naturalny, ludzki język — unikaj sztywnych fraz typu „uprzejmie przypominam o naszym zapytaniu ofertowym z dnia…”
+• Wspomnij krótko, że czekasz na odpowiedź / wycenę / kontakt — bez presji i bez nachalności
+• Odwołaj się do materiałów budowlanych lub współpracy hurtowej, jeśli pasuje do kontekstu
+• 50–110 słów łącznie
+• NIE powtarzaj długiej listy produktów z pierwszego maila
+
+ZAKAZANE
+• Podpis, imię, telefon, linki, HTML, markdown
+• Słowa: pilnie, ostatnia szansa, natychmiast, gratis, promocja
+• Cudzysłowy wokół całego tekstu
+• Jedna ściana tekstu bez akapitów
+
+WYJŚCIE — TYLKO JSON (bez markdown):
+{{"intro":"..."}}
+
+intro: sam tekst przypomnienia (plain text), z akapitami oddzielonymi pustą linią
+"""
+
+
 def build_custom_email_prompt_uk(
     draft: str,
     company_name: str,

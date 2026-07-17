@@ -60,8 +60,8 @@ SEND_WINDOW_END = 18
 SIGNATURE_PL = (
     "Z poważaniem,\n\n"
     "Maksym Swinczak\n"
-    "Kanbud Sp. z o.o.\n"
-    "tel. +49 1522 3655 399"
+    "https://swinczakdata.pl\n"
+    "tel. 516513965"
 )
 # W stopce przypomnień DE pozostaje MFG (kampanie niemieckie)
 SIGNATURE_DE = (
@@ -1745,25 +1745,24 @@ def _is_mfg_signature_text(text: str) -> bool:
 
 
 def normalize_signature_for_pl(signature: str) -> str:
-    """Przypomnienia do firm PL — stopka Kanbud, nie MFG."""
+    """Przypomnienia do firm PL — stopka zgodna ze swinczakdata.pl."""
     sig = (signature or "").strip()
     if not sig or _is_mfg_signature_text(sig):
         return SIGNATURE_PL
-    if "kanbud" in sig.lower():
+    if "swinczakdata" in sig.lower() or "516513965" in sig:
         return sig
-    # Zamiana linii firmowej MFG na Kanbud, zachowaj resztę jeśli sensowna
     lines = sig.splitlines()
     out: list[str] = []
     for line in lines:
-        if _is_mfg_signature_text(line):
-            if "Kanbud" not in "\n".join(out):
-                out.extend(["Maksym Swinczak", "Kanbud Sp. z o.o.", "tel. +49 1522 3655 399"])
+        if _is_mfg_signature_text(line) or "kanbud" in line.lower():
+            if "swinczakdata" not in "\n".join(out).lower():
+                out.extend(["Maksym Swinczak", "https://swinczakdata.pl", "tel. 516513965"])
             continue
         if "mfg-fliesen" in line.lower() or line.strip().lower().startswith("www:"):
             continue
         out.append(line)
     merged = "\n".join(out).strip()
-    return merged if merged and "kanbud" in merged.lower() else SIGNATURE_PL
+    return merged if merged and "516513965" in merged else SIGNATURE_PL
 
 
 def _reminder_from_line(lang: str) -> str:
@@ -1773,10 +1772,9 @@ def _reminder_from_line(lang: str) -> str:
         if sender_name and sender:
             return f"{sender_name} <{sender}>"
         return sender or sender_name or ""
-    # PL: zawsze Kanbud w nagłówku cytatu (nie nazwa nadawcy z Gmail/MFG)
     if sender:
-        return f"Maksym Swinczak, Kanbud Sp. z o.o. <{sender}>"
-    return "Maksym Swinczak, Kanbud Sp. z o.o."
+        return f"Maksym Swinczak <{sender}>"
+    return "Maksym Swinczak"
 
 
 def format_quoted_previous_email(
@@ -1806,14 +1804,40 @@ def format_quoted_previous_email(
         if from_line:
             header += f"Od: {from_line}\n"
 
-    quoted = "\n".join(
-        f"> {line}" if line.strip() else ">" for line in original_body.splitlines()
+    quoted_body = original_body.strip()
+    return f"{header}\n{quoted_body}"
+
+
+def _static_reminder_intro_pl(
+    sent_date: str, *, reminder_number: int = 1
+) -> str:
+    date_bit = f" z {sent_date}" if sent_date else ""
+    if reminder_number >= 2:
+        return (
+            "Dzień dobry,\n\n"
+            f"Piszę w nawiązaniu do naszego zapytania{date_bit} — "
+            "niestety nie udało mi się uzyskać odpowiedzi. "
+            "Czy mogliby Państwo wrócić z krótką informacją lub orientacyjną wyceną?\n\n"
+            "Będę wdzięczny za każdy sygnał zwrotny."
+        )
+    return (
+        "Dzień dobry,\n\n"
+        f"Chciałbym delikatnie wrócić do naszej wiadomości{date_bit} "
+        "w sprawie materiałów budowlanych. Być może uległa przeoczeniu — "
+        "zdarza się przy dużej liczbie zapytań.\n\n"
+        "Gdyby była taka możliwość, proszę o krótką odpowiedź lub wycenę. "
+        "Z góry dziękuję."
     )
-    return f"{header}\n{quoted}"
 
 
 def build_reminder_email(
-    contact: dict, lang: str, *, reminder_number: int = 1
+    contact: dict,
+    lang: str,
+    *,
+    reminder_number: int = 1,
+    logger: logging.Logger | None = None,
+    cache: dict | None = None,
+    place_url: str = "",
 ) -> tuple[str, str]:
     company = (
         contact.get("company_name_clean")
@@ -1835,38 +1859,42 @@ def build_reminder_email(
 
     subject = _reply_subject(orig_subj, lang, company)
 
-    if reminder_number >= 2:
-        if lang == "de":
+    intro = ""
+    if lang == "pl":
+        try:
+            from pl_claude_reminder_email import claude_generate_reminder_intro_pl
+
+            intro = claude_generate_reminder_intro_pl(
+                contact,
+                logger,
+                cache,
+                reminder_number=reminder_number,
+                cache_key=place_url or str(contact.get("email_target") or ""),
+            ) or ""
+        except Exception:
+            intro = ""
+    if not intro:
+        if reminder_number >= 2:
+            if lang == "de":
+                intro = (
+                    f"Guten Tag,\n\n"
+                    f"ich möchte unsere Anfrage"
+                    f"{f' vom {sent_date}' if sent_date else ''} "
+                    f"noch einmal kurz ansprechen — bisher haben wir leider keine "
+                    f"Rückmeldung erhalten. Wären Sie so freundlich, uns zeitnah zu antworten?"
+                )
+            else:
+                intro = _static_reminder_intro_pl(sent_date, reminder_number=2)
+        elif lang == "de":
             intro = (
                 f"Guten Tag,\n\n"
-                f"ich möchte unsere Anfrage"
+                f"ich erlaube mir, unsere Anfrage"
                 f"{f' vom {sent_date}' if sent_date else ''} "
-                f"noch einmal kurz ansprechen — bisher haben wir leider keine "
-                f"Rückmeldung erhalten. Wären Sie so freundlich, uns zeitnah zu antworten?"
+                f"freundlich in Erinnerung zu rufen. Könnten Sie uns bitte kurz "
+                f"rückmelden oder ein unverbindliches Angebot zusenden?"
             )
         else:
-            intro = (
-                f"Dzień dobry,\n\n"
-                f"ponownie przypominam o naszym zapytaniu ofertowym"
-                f"{f' z dnia {sent_date}' if sent_date else ''} — "
-                f"niestety nie otrzymaliśmy jeszcze odpowiedzi. "
-                f"Będę wdzięczny za krótką informację lub wycenę."
-            )
-    elif lang == "de":
-        intro = (
-            f"Guten Tag,\n\n"
-            f"ich erlaube mir, unsere Anfrage"
-            f"{f' vom {sent_date}' if sent_date else ''} "
-            f"freundlich in Erinnerung zu rufen. Könnten Sie uns bitte kurz "
-            f"rückmelden oder ein unverbindliches Angebot zusenden?"
-        )
-    else:
-        intro = (
-            f"Dzień dobry,\n\n"
-            f"uprzejmie przypominam o naszym zapytaniu ofertowym"
-            f"{f' z dnia {sent_date}' if sent_date else ''}. "
-            f"Będę wdzięczny za krótką informację zwrotną lub wycenę."
-        )
+            intro = _static_reminder_intro_pl(sent_date, reminder_number=1)
 
     quoted = format_quoted_previous_email(orig_body, orig_subj, sent_raw, lang)
     parts = [intro, signature]
@@ -1966,13 +1994,23 @@ def build_reminder_email_for_preset(
     preset: dict,
     *,
     reminder_number: int = 1,
+    logger: logging.Logger | None = None,
+    cache: dict | None = None,
+    place_url: str = "",
 ) -> tuple[str, str]:
     lang = str(preset.get("lang") or "pl").strip().lower()
     if preset.get("bilingual_reminder_de_fr"):
         return _build_bilingual_reminder_email_de_fr(
             contact, reminder_number=reminder_number
         )
-    return build_reminder_email(contact, lang, reminder_number=reminder_number)
+    return build_reminder_email(
+        contact,
+        lang,
+        reminder_number=reminder_number,
+        logger=logger,
+        cache=cache,
+        place_url=place_url,
+    )
 
 
 def _latest_inbound_from_target(

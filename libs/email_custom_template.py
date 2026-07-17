@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Własna treść zapytania ofertowego z GUI → dopracowanie Claude per firma.
-Nie dotyczy maili przypominających (scraper_email_replies.build_reminder_email).
+Maile przypominające PL: pl_claude_reminder_email.py (Claude + fallback).
 """
 from __future__ import annotations
 

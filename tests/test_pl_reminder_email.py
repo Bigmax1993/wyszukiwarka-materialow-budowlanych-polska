@@ -39,7 +39,12 @@ class TestPlReminderEmail(unittest.TestCase):
         subject, body = build_reminder_email(contact, "pl", reminder_number=1)
         self.assertIn("Re:", subject)
         self.assertIn("Dzień dobry", body)
-        self.assertIn("przypominam", body.lower())
+        low = body.lower()
+        self.assertTrue(
+            "przypomin" in low or "wrócić" in low or "wiadomości" in low,
+            body[:200],
+        )
+        self.assertIn("\n\n", body)
 
 
 class TestPlReminderTiming(unittest.TestCase):

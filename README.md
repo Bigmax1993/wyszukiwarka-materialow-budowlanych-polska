@@ -112,7 +112,7 @@ Concurrency: `pl-pipeline` (w tym repo).
 | `SERPER_API_KEY` | tak | API Serper |
 | `ANTHROPIC_API_KEY` | tak | Claude API |
 | `MAIL_USER`, `MAIL_PASSWORD` | tak (send) | SMTP / Gmail |
-| `MAIL_SENDER_NAME` | tak | Maksym Świńczak |
+| `MAIL_SENDER_NAME` | tak | Maksym Swinczak |
 | `GDRIVE_FOLDER_ID_PL` | tak | `1O15CdN0TH8rx74sPP5C1GuYSweX81IGw` |
 | `GDRIVE_OAUTH_*` | zalecany | Upload OAuth |
 

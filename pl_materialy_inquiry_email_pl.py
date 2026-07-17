@@ -69,8 +69,9 @@ def _clean_sender_display_name(raw: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" ,;-")
 
 
-DEFAULT_INQUIRY_SENDER_NAME_PL = "Maksym Świńczak"
+DEFAULT_INQUIRY_SENDER_NAME_PL = "Maksym Swinczak"
 DEFAULT_INQUIRY_PHONE_PL = "516513965"
+DEFAULT_INQUIRY_WEBSITE_PL = "https://swinczakdata.pl"
 
 
 def inquiry_sender_name() -> str:
@@ -100,7 +101,8 @@ def inquiry_phone() -> str:
 def inquiry_website() -> str:
     from scraper_env import get_env_value
 
-    return get_env_value("INQUIRY_WEBSITE").strip()
+    web = get_env_value("INQUIRY_WEBSITE").strip()
+    return web or DEFAULT_INQUIRY_WEBSITE_PL
 
 
 def build_inquiry_signature_pl() -> str:
@@ -172,11 +174,11 @@ def strip_legacy_branding_preserve_layout(text: str) -> str:
 
 def build_inquiry_sender_brief_pl() -> str:
     company = inquiry_company_name()
-    who = company if company else "Kupujący materiałów budowlanych"
+    who = company if company else "Analityk rynku materiałów budowlanych (B2B)"
     return (
-        f"{who} poszukuje dostawców materiałów budowlanych w Polsce do regularnych "
-        "zakupów hurtowych (cement, piasek, żwir, cegła, bloczki, stal zbrojeniowa, "
-        "styropian, wełna mineralna, płyty gipsowe, dachówki, zaprawy, farby itd.)."
+        f"{who} — zbieram informacje o ofertach hurtowych w ramach analizy rynku "
+        "i benchmarku dostawców (cement, piasek, żwir, bloczki, stal, styropian, "
+        "wełna, płyty GK, dachówki, zaprawy itd.). Szczegóły: https://swinczakdata.pl/dla-hurtowni.html"
     )
 
 
@@ -197,20 +199,21 @@ def build_sender_contact_line_pl() -> str:
 
 def build_fixed_material_inquiry_pl() -> str:
     intro = (
-        "zwracam się z zapytaniem o możliwość dostawy materiałów budowlanych "
-        "na warunkach hurtowych."
+        "zwracam się w ramach analizy rynku materiałów budowlanych (benchmark B2B). "
+        "Proszę o informację o możliwości dostawy hurtowej w Państwa regionie."
     )
     if inquiry_company_name():
         intro = (
-            f"zwracam się w imieniu {inquiry_company_name()}. "
-            "Poszukujemy sprawdzonych dostawców materiałów budowlanych w Polsce "
-            "do regularnych zakupów."
+            f"zwracam się w imieniu {inquiry_company_name()} w ramach analizy rynku "
+            "materiałów budowlanych. Poszukujemy ofert hurtowych do porównania dostawców."
         )
     return f"""Szanowni Państwo,
 
 {intro}
 
-Interesuje nas szeroki asortyment: cement, piasek, żwir, kruszywa, cegła, bloczki, stal zbrojeniowa, styropian, wełna mineralna, płyty gipsowe, pokrycia dachowe, zaprawy, farby i produkty pokrewne. Zależą nam na cenach hurtowych, dostępności magazynowej oraz możliwości dostawy.
+Interesuje nas szeroki asortyment: cement, piasek, żwir, kruszywa, cegła, bloczki, stal zbrojeniowa, styropian, wełna mineralna, płyty gipsowe, pokrycia dachowe, zaprawy, farby i produkty pokrewne. Zależą nam na cenach hurtowych netto, dostępności magazynowej oraz możliwości dostawy.
+
+Więcej o współpracy B2B: https://swinczakdata.pl/dla-hurtowni.html
 
 Prosimy o przesłanie aktualnego cennika lub wskazanie osoby kontaktowej z działu sprzedaży / hurtu.
 

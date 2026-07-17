@@ -6446,7 +6446,7 @@ def _run_smoke_tests() -> None:
         inquiry_sender_name,
     )
 
-    assert DEFAULT_INQUIRY_SENDER_NAME_PL == "Maksym Świńczak"
+    assert DEFAULT_INQUIRY_SENDER_NAME_PL == "Maksym Swinczak"
     assert DEFAULT_INQUIRY_PHONE_PL == "516513965"
     assert inquiry_sender_name() in FIXED_MATERIAL_INQUIRY_PL
     assert inquiry_phone() in build_inquiry_signature_pl()

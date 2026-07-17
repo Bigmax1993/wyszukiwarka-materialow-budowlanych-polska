@@ -41,7 +41,7 @@ Offset +5h względem UA — osobne repozytorium, osobny `pl-pipeline`.
 | `SERPER_API_KEY` | tak | API Serper |
 | `ANTHROPIC_API_KEY` | tak | Claude API |
 | `MAIL_USER`, `MAIL_PASSWORD` | tak | SMTP |
-| `MAIL_SENDER_NAME` | tak | Maksym Świńczak |
+| `MAIL_SENDER_NAME` | tak | Maksym Swinczak |
 | `GDRIVE_FOLDER_ID_PL` | tak | `1O15CdN0TH8rx74sPP5C1GuYSweX81IGw` |
 | `GDRIVE_OAUTH_*` | zalecany | OAuth upload |
 

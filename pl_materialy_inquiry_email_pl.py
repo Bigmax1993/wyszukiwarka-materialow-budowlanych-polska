@@ -75,9 +75,10 @@ DEFAULT_INQUIRY_WEBSITE_PL = "https://swinczakdata.pl"
 
 
 def inquiry_sender_name() -> str:
-    from scraper_env import get_mail_sender_name
+    from scraper_env import get_mail_sender_name, normalize_mail_sender_name
 
     cleaned = _clean_sender_display_name(get_mail_sender_name() or "")
+    cleaned = normalize_mail_sender_name(cleaned)
     if not cleaned or any(x in cleaned.lower() for x in ("свінчак", "свинчак", "mfg", "fliesen")):
         return DEFAULT_INQUIRY_SENDER_NAME_PL
     return cleaned

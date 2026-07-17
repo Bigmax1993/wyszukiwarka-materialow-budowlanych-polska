@@ -35,6 +35,7 @@ env:
   DISABLE_SEND_WINDOW: "1"
   KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
   MAIL_ARCHIVE_IMAP: "1"
+  MAIL_IMAP_ARCHIVE_FOLDER: wyslane
 
 jobs:
   send:

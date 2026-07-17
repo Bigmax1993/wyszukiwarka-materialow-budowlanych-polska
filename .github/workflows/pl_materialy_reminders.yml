@@ -13,10 +13,10 @@ on:
         type: boolean
         default: true
       artifact_name:
-        description: Artefakt źródłowy cache (domyślnie najnowszy tue)
+        description: Artefakt źródłowy cache (domyślnie najnowszy reminders)
         required: false
         type: string
-        default: "pl-materialy-wyniki-tue"
+        default: "pl-materialy-wyniki-reminders"
 
 permissions:
   actions: read
@@ -57,10 +57,10 @@ jobs:
             gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
               --jq "[.artifacts[] | select(.name==\"${artifact_name}\" and .expired==false)] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty"
           }
-          PREFERRED="${{ github.event_name == 'workflow_dispatch' && inputs.artifact_name || 'pl-materialy-wyniki-tue' }}"
+          PREFERRED="${{ github.event_name == 'workflow_dispatch' && inputs.artifact_name || 'pl-materialy-wyniki-reminders' }}"
           RUN_ID=$(resolve_run_id "$PREFERRED")
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-            for NAME in pl-materialy-wyniki-tue pl-materialy-wyniki-mon pl-materialy-wyniki-fri pl-materialy-wyniki-reminders pl-materialy-wyniki-thu pl-materialy-wyniki-pi; do
+            for NAME in pl-materialy-wyniki-reminders pl-materialy-wyniki-tue pl-materialy-wyniki-mon pl-materialy-wyniki-fri pl-materialy-wyniki-thu pl-materialy-wyniki-pi; do
               RUN_ID=$(resolve_run_id "$NAME")
               if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
                 PREFERRED="$NAME"

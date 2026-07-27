@@ -79,6 +79,9 @@ jobs:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
           MAIL_SENDER_NAME: ${{ secrets.MAIL_SENDER_NAME }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_UNLIMITED: "1"
+          REQUIRE_CLAUDE_INQUIRY_EMAIL: "1"
         run: |
           ARGS="--run-config run_config/pl_materialy.json --send-emails-only --ignore-send-window"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force_resend }}" = "true" ]; then

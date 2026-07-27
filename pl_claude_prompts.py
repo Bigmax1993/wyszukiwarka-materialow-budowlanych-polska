@@ -248,12 +248,20 @@ def build_personalized_inquiry_email_prompt_pl(
     materials: str = "",
     page_snippet: str = "",
     style_hint: str = "",
+    discovery_wojewodztwo: str = "",
+    construction_project=None,
 ) -> str:
     from pl_materialy_inquiry_email_pl import (
-        build_inquiry_sender_brief_pl,
-        build_inquiry_signature_pl,
-        build_sender_contact_line_pl,
         inquiry_phone,
+        inquiry_sender_name,
+    )
+    from pl_regional_sender_context import (
+        build_regional_sender_instructions_pl,
+        resolve_discovery_wojewodztwo,
+    )
+    from pl_regional_construction_refs import (
+        build_construction_project_prompt_block_pl,
+        pick_construction_project,
     )
 
     snippet = (page_snippet or "").strip()
@@ -261,54 +269,78 @@ def build_personalized_inquiry_email_prompt_pl(
         snippet = snippet[:3497] + "..."
     style = (style_hint or "profesjonalny, naturalny styl B2B, bez szablonowych fraz").strip()
     mats = materials or "materiały budowlane (szeroki asortyment)"
-    sender_brief = build_inquiry_sender_brief_pl()
-    sender_contact = build_sender_contact_line_pl()
-    signature_block = build_inquiry_signature_pl()
-    phone = inquiry_phone()
+    region_key = resolve_discovery_wojewodztwo(
+        {"bundesland": wojewodztwo, "discovery_bundesland": discovery_wojewodztwo},
+        fallback=wojewodztwo or discovery_wojewodztwo,
+    )
+    project = construction_project or pick_construction_project(
+        region_key, seed=company_name or wojewodztwo or discovery_wojewodztwo
+    )
+    project_block = build_construction_project_prompt_block_pl(project)
+    regional_sender = build_regional_sender_instructions_pl(
+        region_key,
+        sender_name=inquiry_sender_name(),
+        sender_phone=inquiry_phone(),
+        construction_project_block=project_block,
+    )
     return f"""ROLA
-Jesteś autorem listów B2B po polsku. Piszesz UNIKALNY list do KONKRETNEJ hurtowni / dostawcy materiałów budowlanych w Polsce.
-Każdy list ma różnić się sformułowaniami — nie kopiuj jednego szablonu.
+Jesteś autorem listów B2B po polsku. Piszesz UNIKALNY list do KONKRETNEJ firmy-dostawcy materiałów budowlanych w Polsce.
+Każdy list ma różnić się sformułowaniami — nie kopiuj jednego szablonu dla wszystkich.
 
-NADAWCA (kontekst, nie wymyślaj innych faktów)
-{sender_brief}
-Kontakt: {sender_contact or "kupujący materiałów budowlanych"}
+{regional_sender}
 
-ODBIORCA
+ODBIORCA (dostawca materiałów budowlanych)
 Nazwa: {company_name}
 Strona: {website or "(brak)"}
-Województwo: {wojewodztwo or "(nieznane)"}
+Województwo dostawcy: {wojewodztwo or "(nieznane)"}
 Adres: {address or "(brak)"}
 Kategorie materiałów (z bazy): {mats}
 
-FRAGMENT STRONY / OPIS (użyj do personalizacji — wspomnij asortyment, region, specjalizację):
+FRAGMENT STRONY / OPIS (użyj do personalizacji — wspomnij ich asortyment, region, specjalizację):
 {snippet or "(brak — zwróć się ogólnie do dostawcy materiałów budowlanych)"}
 
 ZADANIE
 Napisz w pełni spersonalizowany list ZAPYTANIA o współpracę / ceny hurtowe / cennik.
 • Język: WYŁĄCZNIE polski.
 • Zwrot: „Szanowni Państwo” lub spersonalizowany do {company_name}.
-• Koniecznie wspomnij coś konkretnego o tej firmie (asortyment, region, typ działalności).
+• Koniecznie wspomnij coś konkretnego o tej firmie-dostawcy (asortyment, region, typ działalności).
+• Koniecznie wspomnij wybraną lokalną firmę budowlaną — MUSI to być PRAWDZIWA, istniejąca firma z regionu (pełna nazwa w treści i w podpisie). Nie wymyślaj fikcyjnych nazw.
+• Koniecznie wspomnij WYŁĄCZNIE obiekt z bloku «OBIEKT BUDOWY» — to realna inwestycja z publicznej bazy (pełna nazwa + adres dosłownie). Nie wymyślaj innych budów.
+• Jednakowy format dla dużych miast (Warszawa, Kraków, Wrocław…) i mniejszych miejscowości (np. Głogów).
 • Poproś o cennik lub kontakt do działu hurtu / sprzedaży.
-• Nie wymyślaj cen, rabatów, terminów dostawy.
+• Nie wymyślaj cen, rabatów, terminów dostawy, których nie ma we wejściu.
 • Styl: {style}
-• Długość treści: 120–220 słów (bez podpisu).
+• Długość treści: 140–240 słów (bez podpisu).
+
+FORMAT LISTU (body — plain text z pustymi liniami między blokami)
+Obowiązkowa struktura — używaj \\n\\n między blokami:
+1) Zwrot (jeden wiersz), np. «Szanowni Państwo,»
+2) Pusta linia
+3) 2–3 akapity głównego tekstu (każdy akapit — osobny blok przez \\n\\n)
+4) Pusta linia
+5) «Z poważaniem,» (osobny wiersz)
+6) Imię oraz stanowisko / PRAWDZIWA firma (osobny wiersz)
+7) Tel.: {inquiry_phone()} (osobny wiersz)
+
+Przykład body w JSON (z \\n oraz \\n\\n) — nazwa firmy w przykładzie jest ILUSTRACYJNA; w realnym liście wstaw prawdziwą firmę z regionu:
+"body":"Szanowni Państwo,\\n\\nPierwszy akapit listu.\\n\\nDrugi akapit z prośbą o cennik.\\n\\nZ poważaniem,\\n{inquiry_sender_name()}\\nMenedżer działu sprzedaży\\n[prawdziwa lokalna firma budowlana]\\nTel.: {inquiry_phone()}"
 
 ZAKAZANE
-• Numery ukraińskie (+380) i niemieckie (+49)
-• Jedyny telefon kontaktowy w podpisie: {phone}
+• Numery ukraińskie (+380) i niemieckie (+49) — zabronione; jedyny telefon kontaktowy: {inquiry_phone()} (w podpisie)
 • Słowa: gratis, promocja, pilnie, kliknij, rabat 50%
 • Ten sam tekst dla różnych firm
-• Załączniki / pliki / linki do pobrania
+• Zabronione dodawanie załączników / plików / linków do pobrania
 • HTML, markdown
-
-PODPIS (dodaj na końcu body BEZ zmian):
-{signature_block}
+• Przedstawianie się jako dostawca lub anonimowy „kupujący” bez nazwy firmy budowlanej
+• Fikcyjne / wymyślone nazwy firm-nadawców (np. „Budownictwo Region Sp. z o.o.”, „Firma Budowlana XYZ”, „Local Build”)
+• Wymyślone lub zmienione adresy placu budowy (inna ulica, numer, miasto)
+• Inny obiekt budowy niż ten z bloku «OBIEKT BUDOWY» — nawet jeśli znasz podobną inwestycję w okolicy
 
 WYJŚCIE — TYLKO JSON (bez markdown):
 {{"subject":"...","body":"..."}}
 
-subject: unikalny, do 78 znaków, po polsku, z nazwą lub specjalizacją firmy
-body: pełny list gotowy do wysyłki (plain text), łącznie z podpisem powyżej
+subject: unikalny, do 78 znaków, po polsku; wspomnij typ obiektu budowy lub region
+body: pełny list gotowy do wysyłki (plain text z akapitami przez \\n\\n), łącznie z podpisem (imię, stanowisko, firma, tel.)
 """
 
 
@@ -331,38 +363,36 @@ def build_reminder_email_prompt_pl(
     date_line = f"Data pierwszego maila: {sent_date}." if sent_date else ""
     subj_line = f"Temat pierwszego maila: {original_subject}." if original_subject else ""
     return f"""ROLA
-Piszesz krótki, NATURALNY mail przypominający po polsku — jak człowiek z branży budowlanej, nie bot.
-To follow-up B2B do hurtowni / dostawcy materiałów budowlanych, który nie odpowiedział na zapytanie.
+Piszesz krótki, NATURALNY list-przypomnienie po polsku — jak żywa osoba z branży budowlanej, nie bot.
+To follow-up B2B do dostawcy materiałów budowlanych, który nie odpowiedział na zapytanie.
 
 ODBIORCA
 Firma: {company_name}
 {date_line}
 {subj_line}
 
-KONTEKST (pierwszy mail — NIE wklejaj go ponownie, tylko odwołaj się ogólnie):
-{excerpt or "(brak treści — odwołaj się do zapytania ofertowego o materiały budowlane)"}
+KONTEKST (pierwszy list — NIE wklejaj go ponownie, tylko odwołaj się ogólnie):
+{excerpt or "(brak treści — odwołaj się do zapytania o materiały budowlane)"}
 
 ZADANIE
-Napisz WYŁĄCZNIE treść przypomnienia (bez podpisu, bez cytatu poprzedniego maila).
+Napisz WYŁĄCZNIE tekst przypomnienia (bez podpisu, bez cytatu poprzedniego listu).
 • Ton: {tone}
 • 2–3 krótkie akapity oddzielone pustą linią (\\n\\n)
 • Zacznij od „Dzień dobry,” lub spersonalizowanego zwrotu do {company_name}
-• Naturalny, ludzki język — unikaj sztywnych fraz typu „uprzejmie przypominam o naszym zapytaniu ofertowym z dnia…”
-• Wspomnij krótko, że czekasz na odpowiedź / wycenę / kontakt — bez presji i bez nachalności
-• Odwołaj się do materiałów budowlanych lub współpracy hurtowej, jeśli pasuje do kontekstu
+• Naturalny, ludzki język — unikaj szablonowych fraz typu „uprzejmie przypominam o naszym zapytaniu ofertowym z dnia…”
+• Krótko wspomnij, że czekasz na odpowiedź / cennik / kontakt — bez nacisku
 • 50–110 słów łącznie
-• NIE powtarzaj długiej listy produktów z pierwszego maila
+• NIE powtarzaj długiej listy produktów z pierwszego listu
 
 ZAKAZANE
 • Podpis, imię, telefon, linki, HTML, markdown
 • Słowa: pilnie, ostatnia szansa, natychmiast, gratis, promocja
-• Cudzysłowy wokół całego tekstu
 • Jedna ściana tekstu bez akapitów
 
 WYJŚCIE — TYLKO JSON (bez markdown):
 {{"intro":"..."}}
 
-intro: sam tekst przypomnienia (plain text), z akapitami oddzielonymi pustą linią
+intro: tylko tekst przypomnienia (plain text), z akapitami przez pustą linię
 """
 
 

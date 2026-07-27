@@ -89,10 +89,22 @@ def test_claude_inquiry_prompt_polish_and_phone():
     p = build_personalized_inquiry_email_prompt_pl(
         company_name="Hurtownia Test",
         wojewodztwo="mazowieckie",
+        discovery_wojewodztwo="mazowieckie",
     )
     assert "polsk" in p.lower()
     assert "516513965" in p
     assert "JSON" in p
+    assert "FORMAT LISTU" in p
+    assert "OBIEKT BUDOWY" in p
+    assert "REGION DISCOVERY" in p
+    assert "\\n\\n" in p
+    assert "Z poważaniem," in p
+    assert "analizy rynku" not in p.lower()
+    assert "benchmark" not in p.lower()
+    assert "realn" in p.lower() or "publiczn" in p.lower()
+    assert "Nie wymyślaj innych budów" in p or "WYŁĄCZNIE obiekt" in p
+    assert "PRAWDZIWA" in p or "istniejącą" in p.lower() or "ISTNIEJĄCĄ" in p
+    assert "Fikcyjne" in p or "wymyślone nazwy firm" in p.lower() or "XYZ" in p
 
 
 @pytest.mark.parametrize("workflow_file", PL_WORKFLOWS)

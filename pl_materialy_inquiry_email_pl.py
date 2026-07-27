@@ -163,6 +163,125 @@ def ensure_inquiry_signature(body: str) -> str:
     return text.rstrip() + "\n\n" + signature
 
 
+_SALUTATION_PREFIX_RE = re.compile(
+    r"^(Szanowni Państwo,?)\s*",
+    re.IGNORECASE,
+)
+_SIGNATURE_MARKER_RE = re.compile(r"\b(Z poważaniem,?)\b", re.IGNORECASE)
+_TEL_LINE_RE = re.compile(
+    r"\b(?:Tel\.?|Telefon):?\s*(?:\+48)?[\d\s()./-]{7,}",
+    re.IGNORECASE,
+)
+_WEB_INLINE_RE = re.compile(r"(?:https?://\S+|www\.\S+)", re.IGNORECASE)
+
+
+def format_inquiry_email_body_pl(body: str) -> str:
+    """Układa treść maila: akapity, odstępy między blokami, czytelny podpis."""
+    if not body:
+        return ""
+    text = body.replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in text.split("\n")]
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    if "\n" not in text:
+        text = _format_dense_inquiry_body_pl(text)
+    else:
+        text = _ensure_salutation_spacing_pl(text)
+        text = _ensure_signature_spacing_pl(text)
+        text = _normalize_signature_lines_pl(text)
+
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
+
+def _ensure_salutation_spacing_pl(text: str) -> str:
+    match = _SALUTATION_PREFIX_RE.match(text)
+    if not match:
+        return text
+    salutation = match.group(1).rstrip(",") + ","
+    rest = text[match.end() :].lstrip()
+    if rest.startswith("\n\n"):
+        return text
+    if rest.startswith("\n"):
+        return f"{salutation}\n{rest.lstrip()}"
+    return f"{salutation}\n\n{rest}"
+
+
+def _ensure_signature_spacing_pl(text: str) -> str:
+    match = _SIGNATURE_MARKER_RE.search(text)
+    if not match:
+        return text
+    before = text[: match.start()].rstrip()
+    after = text[match.start() :].lstrip()
+    if before.endswith("\n\n") or not before:
+        return text
+    return f"{before}\n\n{after}"
+
+
+def _format_dense_inquiry_body_pl(text: str) -> str:
+    match = _SIGNATURE_MARKER_RE.search(text)
+    if match:
+        main = text[: match.start()].strip()
+        signature = _normalize_signature_lines_pl(text[match.start() :].strip())
+        main = _ensure_salutation_spacing_pl(main)
+        return f"{main.rstrip()}\n\n{signature}"
+    return _ensure_salutation_spacing_pl(text)
+
+
+def _normalize_signature_lines_pl(text: str) -> str:
+    match = _SIGNATURE_MARKER_RE.search(text)
+    if not match:
+        return text
+    before = text[: match.start()].rstrip()
+    marker = match.group(1)
+    if not marker.endswith(","):
+        marker = marker + ","
+    rest = text[match.end() :].strip()
+    if not rest:
+        signature = marker
+    else:
+        tel_match = _TEL_LINE_RE.search(rest)
+        tel = tel_match.group(0).strip() if tel_match else ""
+        if tel_match:
+            rest = (rest[: tel_match.start()] + rest[tel_match.end() :]).strip(" ,;")
+
+        web_match = _WEB_INLINE_RE.search(rest)
+        web = web_match.group(0).strip() if web_match else ""
+        if web_match:
+            rest = (rest[: web_match.start()] + rest[web_match.end() :]).strip(" ,;")
+
+        name_lines = [ln.strip(" ,;") for ln in rest.splitlines() if ln.strip(" ,;")]
+        parts = [marker]
+        parts.extend(name_lines)
+        if web:
+            parts.append(web)
+        if tel:
+            parts.append(tel if tel.lower().startswith("tel") else f"Tel.: {tel}")
+        signature = "\n".join(parts)
+    if before:
+        return f"{before}\n\n{signature}"
+    return signature
+
+
+def ensure_inquiry_contact_in_body(body: str) -> str:
+    """
+    Uzupełnia brakujący telefon PL w podpisie.
+    Nie dokleja statycznego podpisu, jeśli Claude już dodał blok «Z poważaniem».
+    """
+    text = strip_legacy_branding_preserve_layout(
+        strip_foreign_phones_from_text((body or "").strip())
+    )
+    if not text:
+        return build_inquiry_signature_pl()
+    phone = inquiry_phone()
+    if phone in text:
+        return text
+    if re.search(r"z\s+powa[zż]aniem", text, flags=re.IGNORECASE):
+        return f"{text.rstrip()}\nTel.: {phone}"
+    return f"{text.rstrip()}\n\n{build_inquiry_signature_pl()}"
+
+
 def strip_legacy_branding_preserve_layout(text: str) -> str:
     if not text:
         return ""

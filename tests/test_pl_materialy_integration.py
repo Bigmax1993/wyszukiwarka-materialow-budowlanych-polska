@@ -139,3 +139,11 @@ def test_sync_drive_pl_uses_pl_campaign():
     text = (ROOT / ".github" / "workflows" / "sync-google-drive-pl.yml").read_text(encoding="utf-8")
     assert "GDRIVE_FOLDER_ID_PL" in text
     assert "--campaign pl" in text
+
+
+def test_sunday_backfill_verifies_excel_from_json_and_uploads_drive():
+    text = (ROOT / ".github" / "workflows" / "pl_materialy_thu.yml").read_text(encoding="utf-8")
+    assert "verify_excel_from_json.py" in text
+    assert "gdrive_upload_wyniki.py" in text
+    assert "GDRIVE_FOLDER_ID_PL" in text
+    assert "--campaign pl" in text

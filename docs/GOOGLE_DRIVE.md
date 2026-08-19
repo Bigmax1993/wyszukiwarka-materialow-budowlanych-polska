@@ -18,7 +18,7 @@ Folder w chmurze: [PL Materialy Budowlane](https://drive.google.com/drive/folder
 
 | Sposób | Kiedy |
 |--------|--------|
-| **GitHub Actions** | Workflow `Sync wyniki Google Drive PL` (poniedziałek 11:00 Europe/Warsaw) |
+| **GitHub Actions** | Niedzielny backfill (`PL niedziela backfill`): upload → weryfikacja Excel vs JSON → ponowny upload. Dodatkowo poniedziałek 11:00 `Sync wyniki Google Drive PL`. |
 | **Lokalnie** | `python scripts/gdrive_upload_wyniki.py --campaign pl` |
 | **PC + Drive for desktop** | `KANBUD_DATA_DIR` → folder `PL Materialy Budowlane Wyniki` |
 

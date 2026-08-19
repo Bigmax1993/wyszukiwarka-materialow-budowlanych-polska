@@ -22,7 +22,7 @@ Folder w chmurze: [PL Materialy Budowlane](https://drive.google.com/drive/folder
 | **Lokalnie** | `python scripts/gdrive_upload_wyniki.py --campaign pl` |
 | **PC + Drive for desktop** | `KANBUD_DATA_DIR` → folder `PL Materialy Budowlane Wyniki` |
 
-Artefakt źródłowy sync: `pl-materialy-wyniki-thu` (niedzielny backfill). Szczegóły: [`docs/GITHUB_ACTIONS.md`](GITHUB_ACTIONS.md).
+Artefakt źródłowy sync: najnowszy z `pi` (discovery) / `fri` / `tue` / `mon` / `thu` — nie stary `reminders`. Szczegóły: [`docs/GITHUB_ACTIONS.md`](GITHUB_ACTIONS.md).
 
 ### Excel — jeden plik, append
 
@@ -48,7 +48,7 @@ Skrypt ustawi secrets `GDRIVE_OAUTH_*`. Kolejne runy CI uploadują na folder PL.
 |--------|---------|
 | **Kiedy** | **Poniedziałek 11:00** (Europe/Warsaw) |
 | **Cron** | `0 11 * * 1` |
-| **Źródło danych** | Artefakt **`pl-materialy-wyniki-thu`** |
-| **Kolejność fallback** | `thu` → `mon` → `tue` → `fri` |
+| **Źródło danych** | Najnowszy artefakt pipeline (`pi` / `fri` / `tue` / `mon` / `thu`) |
+| **Kolejność** | Najnowsza data utworzenia; `reminders` tylko gdy brak pipeline |
 
 Lokalny skrypt `scripts/upload_wyniki_to_drive.ps1` używa tej samej kolejności artefaktów co workflow CI.

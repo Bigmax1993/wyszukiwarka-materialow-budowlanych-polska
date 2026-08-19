@@ -146,6 +146,26 @@ jobs:
             Wyniki/
             wyslane/
 
+      - name: Install Google Drive dependencies
+        if: success()
+        run: pip install -r requirements-drive.txt
+
+      - name: Upload Wyniki to Google Drive
+        if: success()
+        env:
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
+          GDRIVE_VERSION_XLSX: "0"
+          GDRIVE_APPEND_XLSX: "1"
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
+          GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
+          GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
+          GDRIVE_IMPERSONATE_EMAIL: ${{ secrets.GDRIVE_IMPERSONATE_EMAIL }}
+          GDRIVE_SHARED_DRIVE_ID: ${{ secrets.GDRIVE_SHARED_DRIVE_ID }}
+        run: |
+          mkdir -p Wyniki wyslane 2>/dev/null || true
+          python scripts/gdrive_upload_wyniki.py --campaign-dir . --campaign pl
+
       - name: Wznow po timeout
         if: cancelled() && steps.prev_run.outputs.phase != ''
         env:

@@ -36,7 +36,7 @@ jobs:
 
       - run: pip install -r requirements.txt -r requirements-drive.txt
 
-      - name: Resolve artifact (thu → mon → tue → fri)
+      - name: Resolve artifact (najnowszy pi/fri/tue/mon/thu)
         id: artifact_run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -49,17 +49,26 @@ jobs:
             echo "$ALL" | jq -s --arg n "$name" \
               '[.[] | select(.name == $n)] | sort_by(.created_at) | reverse | .[0] // empty'
           }
+          pick_newest_pipeline() {
+            echo "$ALL" | jq -s '
+              [
+                .[] | select(
+                  .name == "pl-materialy-wyniki-pi"
+                  or .name == "pl-materialy-wyniki-fri"
+                  or .name == "pl-materialy-wyniki-tue"
+                  or .name == "pl-materialy-wyniki-mon"
+                  or .name == "pl-materialy-wyniki-thu"
+                )
+              ] | sort_by(.created_at) | reverse | .[0] // empty'
+          }
           PICK=""
           if [ -n "$FORCED" ]; then
             PICK=$(pick_latest "$FORCED")
           else
-            for NAME in pl-materialy-wyniki-reminders pl-materialy-wyniki-thu pl-materialy-wyniki-mon pl-materialy-wyniki-tue pl-materialy-wyniki-fri; do
-              CAND=$(pick_latest "$NAME")
-              if [ -n "$CAND" ] && [ "$CAND" != "null" ]; then
-                PICK="$CAND"
-                break
-              fi
-            done
+            PICK=$(pick_newest_pipeline)
+            if [ -z "$PICK" ] || [ "$PICK" = "null" ]; then
+              PICK=$(pick_latest "pl-materialy-wyniki-reminders")
+            fi
           fi
           if [ -z "$PICK" ] || [ "$PICK" = "null" ]; then
             echo "artifact=" >> "$GITHUB_OUTPUT"

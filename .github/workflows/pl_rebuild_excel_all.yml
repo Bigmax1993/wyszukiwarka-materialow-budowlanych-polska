@@ -28,7 +28,7 @@ env:
 jobs:
   rebuild-all:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -50,14 +50,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p _arts
+          mkdir -p Wyniki wyslane
+          STATE="Wyniki/pl_materialy_contacts_state.json"
           gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
             --jq '.artifacts[] | select(.expired==false and (.name | startswith("pl-materialy-wyniki-"))) | {name, id, run: .workflow_run.id, size: .size_in_bytes, created_at}' \
             > /tmp/arts.ndjson
           jq -s 'unique_by(.id) | sort_by(.created_at)' /tmp/arts.ndjson > /tmp/arts.json
           COUNT=$(jq 'length' /tmp/arts.json)
           echo "Artefaktow do pobrania: $COUNT"
+          n=0
           jq -c '.[]' /tmp/arts.json | while read -r row; do
+            n=$((n+1))
             NAME=$(echo "$row" | jq -r '.name')
             RUN=$(echo "$row" | jq -r '.run')
             SIZE=$(echo "$row" | jq -r '.size')
@@ -65,16 +68,29 @@ jobs:
               echo "Pomijam $NAME — brak workflow_run.id"
               continue
             fi
-            DEST="_arts/${NAME}-${RUN}"
+            DEST="_arts/one"
+            rm -rf "$DEST"
             mkdir -p "$DEST"
-            echo "Pobieram $NAME run=$RUN size=$SIZE"
-            gh run download "$RUN" -R "${{ github.repository }}" -n "$NAME" -D "$DEST" \
-              || echo "::warning::Nie pobrano $NAME z run $RUN"
+            echo "[$n/$COUNT] Pobieram $NAME run=$RUN size=$SIZE"
+            if gh run download "$RUN" -R "${{ github.repository }}" -n "$NAME" -D "$DEST"; then
+              python scripts/rebuild_excel_from_all_artifacts.py \
+                --ingest --src "$DEST" --state "$STATE" --wyniki Wyniki --wyslane wyslane \
+                || echo "::warning::Ingest nieudany dla $NAME run=$RUN"
+            else
+              echo "::warning::Nie pobrano $NAME z run $RUN"
+            fi
+            rm -rf "$DEST"
           done
+          if [ ! -s "$STATE" ]; then
+            echo "::error::Brak scalonego JSON po ingestji artefaktow"
+            exit 1
+          fi
 
       - name: Rebuild Excel from all JSON + verify/fill loop
         run: |
-          python scripts/rebuild_excel_from_all_artifacts.py --src _arts --wyniki Wyniki --wyslane wyslane
+          python scripts/rebuild_excel_from_all_artifacts.py \
+            --from-state Wyniki/pl_materialy_contacts_state.json \
+            --wyniki Wyniki --wyslane wyslane
 
       - name: Upload Wyniki artifact
         if: always()

@@ -9,11 +9,6 @@ on:
         description: "Opcjonalnie wymus artefakt (np. pl-materialy-wyniki-thu)"
         required: false
         type: string
-      sync_all:
-        description: "Scal wszystkie artefakty pi/fri/tue/mon/thu i wgraj na Drive (Excel+eml+cache)"
-        required: false
-        type: boolean
-        default: false
   schedule:
     - cron: "0 11 * * 1"
       timezone: Europe/Warsaw
@@ -32,7 +27,6 @@ env:
 jobs:
   upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -42,8 +36,7 @@ jobs:
 
       - run: pip install -r requirements.txt -r requirements-drive.txt
 
-      - name: Resolve artifact (najnowszy pi/fri/tue/mon/thu)
-        if: ${{ github.event.inputs.sync_all != 'true' }}
+      - name: Resolve artifact (thu → mon → tue → fri)
         id: artifact_run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,26 +49,17 @@ jobs:
             echo "$ALL" | jq -s --arg n "$name" \
               '[.[] | select(.name == $n)] | sort_by(.created_at) | reverse | .[0] // empty'
           }
-          pick_newest_pipeline() {
-            echo "$ALL" | jq -s '
-              [
-                .[] | select(
-                  .name == "pl-materialy-wyniki-pi"
-                  or .name == "pl-materialy-wyniki-fri"
-                  or .name == "pl-materialy-wyniki-tue"
-                  or .name == "pl-materialy-wyniki-mon"
-                  or .name == "pl-materialy-wyniki-thu"
-                )
-              ] | sort_by(.created_at) | reverse | .[0] // empty'
-          }
           PICK=""
           if [ -n "$FORCED" ]; then
             PICK=$(pick_latest "$FORCED")
           else
-            PICK=$(pick_newest_pipeline)
-            if [ -z "$PICK" ] || [ "$PICK" = "null" ]; then
-              PICK=$(pick_latest "pl-materialy-wyniki-reminders")
-            fi
+            for NAME in pl-materialy-wyniki-reminders pl-materialy-wyniki-thu pl-materialy-wyniki-mon pl-materialy-wyniki-tue pl-materialy-wyniki-fri; do
+              CAND=$(pick_latest "$NAME")
+              if [ -n "$CAND" ] && [ "$CAND" != "null" ]; then
+                PICK="$CAND"
+                break
+              fi
+            done
           fi
           if [ -z "$PICK" ] || [ "$PICK" = "null" ]; then
             echo "artifact=" >> "$GITHUB_OUTPUT"
@@ -86,54 +70,13 @@ jobs:
           echo "run-id=$(echo "$PICK" | jq -r '.workflow_run.id')" >> "$GITHUB_OUTPUT"
 
       - name: Download pipeline artifact
-        if: ${{ github.event.inputs.sync_all != 'true' && steps.artifact_run.outputs.run-id != '' }}
+        if: steps.artifact_run.outputs.run-id != ''
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.artifact_run.outputs.artifact }}
           github-token: ${{ github.token }}
           run-id: ${{ steps.artifact_run.outputs.run-id }}
           path: .
-
-      - name: Download and merge all pipeline artifacts
-        if: ${{ github.event.inputs.sync_all == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p _arts Wyniki wyslane
-          ALL=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
-            --paginate --jq '.artifacts[] | select(.expired==false)')
-          pick_latest() {
-            local name="$1"
-            echo "$ALL" | jq -s --arg n "$name" \
-              '[.[] | select(.name == $n)] | sort_by(.created_at) | reverse | .[0] // empty'
-          }
-          download_one() {
-            local name="$1"
-            local run_id="$2"
-            local dest="_arts/${name}-${run_id}"
-            mkdir -p "$dest"
-            echo "Pobieram $name z run $run_id"
-            gh run download "$run_id" -R "${{ github.repository }}" -n "$name" -D "$dest"
-          }
-          for NAME in pl-materialy-wyniki-thu pl-materialy-wyniki-mon pl-materialy-wyniki-tue pl-materialy-wyniki-fri pl-materialy-wyniki-pi; do
-            CAND=$(pick_latest "$NAME")
-            if [ -n "$CAND" ] && [ "$CAND" != "null" ]; then
-              download_one "$NAME" "$(echo "$CAND" | jq -r '.workflow_run.id')"
-            fi
-          done
-          BIG_PI=$(echo "$ALL" | jq -s '
-            [.[] | select(.name=="pl-materialy-wyniki-pi")] | max_by(.size_in_bytes) // empty')
-          LATEST_PI=$(pick_latest "pl-materialy-wyniki-pi")
-          if [ -n "$BIG_PI" ] && [ "$BIG_PI" != "null" ]; then
-            BIG_ID=$(echo "$BIG_PI" | jq -r '.workflow_run.id')
-            LATEST_ID=$(echo "$LATEST_PI" | jq -r '.workflow_run.id // empty')
-            if [ -n "$BIG_ID" ] && [ "$BIG_ID" != "$LATEST_ID" ]; then
-              download_one "pl-materialy-wyniki-pi" "$BIG_ID"
-            fi
-          fi
-          python scripts/merge_pl_artifact_dirs.py --src _arts --wyniki Wyniki --wyslane wyslane
-          echo "Scalone pliki: $(find Wyniki wyslane -type f | wc -l)"
 
       - name: Validate GDRIVE credentials
         env:
@@ -168,7 +111,6 @@ jobs:
 
       - name: Upload Wyniki to Google Drive
         env:
-          GDRIVE_UPLOAD_CACHE: ${{ github.event.inputs.sync_all == 'true' && '1' || '0' }}
           GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
           GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
           GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}

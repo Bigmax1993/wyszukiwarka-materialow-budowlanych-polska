@@ -782,9 +782,7 @@ def build_excel_info_sheet_rows() -> list[dict]:
     ]
 
 
-def save_excel(
-    rows, path: Path, logger: logging.Logger, cache=None, require_eligible=True
-) -> None:
+def save_excel(rows, path: Path, logger: logging.Logger, cache=None) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     try:
         rows_for_excel = rows
@@ -802,10 +800,7 @@ def save_excel(
                 for r in rows
             ]
         export_rows = build_export_rows(
-            rows_for_excel,
-            logger=logger,
-            cache=cache,
-            require_eligible=require_eligible,
+            rows_for_excel, logger=logger, cache=cache
         )
         state_rows = build_bundesland_rows(rows_for_excel)
         if cache is None:
@@ -1535,11 +1530,11 @@ def is_row_eligible_for_excel_export(row: dict) -> bool:
     return False
 
 
-def build_export_rows(rows, logger=None, cache=None, require_eligible=True):
+def build_export_rows(rows, logger=None, cache=None):
     export_rows = []
     for row in rows:
         row = normalize_row_company_name(row)
-        if require_eligible and not is_row_eligible_for_excel_export(row):
+        if not is_row_eligible_for_excel_export(row):
             continue
         email = (row.get("email_target") or "").strip()
         if not email:

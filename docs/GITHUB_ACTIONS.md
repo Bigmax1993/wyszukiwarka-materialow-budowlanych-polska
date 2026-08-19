@@ -10,12 +10,12 @@ Kampania UA (osobne repo): [wyszukiwarka-materialow-budowlanych-ukraina](https:/
 |----------|------|---------|---------|
 | **Tests** | `tests.yml` | push, PR | smoke PL + pytest + `test_repo_isolation` |
 | **CI Deploy** | `ci-deploy.yml` | push | smoke PL + secrets + dry-run maili |
-| **PL discovery** | `pl_materialy_pi.yml` | cron, ręcznie | Discovery pon–pt → `pl-materialy-wyniki-pi` + Drive |
+| **PL discovery** | `pl_materialy_pi.yml` | cron, ręcznie | Discovery pon–pt → `pl-materialy-wyniki-pi` |
 | **PL niedziela backfill** | `pl_materialy_thu.yml` | cron, ręcznie | Crawl www + Excel → `pl-materialy-wyniki-thu` |
 | **PL poniedzialek prep** | `pl_materialy_mon.yml` | cron, ręcznie | Rebuild Excel → `pl-materialy-wyniki-mon` |
 | **PL poniedzialek send** | `pl_materialy_tue.yml` | cron, ręcznie | Wysyłka partia 1 (300) → `pl-materialy-wyniki-tue` |
 | **PL wtorek send** | `pl_materialy_fri.yml` | cron, ręcznie | Wysyłka partia 2 → `pl-materialy-wyniki-fri` |
-| **Sync wyniki Google Drive PL** | `sync-google-drive-pl.yml` | cron pon 11:00, ręcznie | Najnowszy `pi`/`fri`/`tue`/`mon`/`thu` → folder PL |
+| **Sync wyniki Google Drive PL** | `sync-google-drive-pl.yml` | cron pon 11:00, ręcznie | Upload `Wyniki/` → folder PL |
 
 ## Harmonogram cron (Europe/Warsaw)
 

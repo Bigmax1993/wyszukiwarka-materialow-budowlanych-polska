@@ -46,6 +46,17 @@ class GdriveSkipUploadTest(unittest.TestCase):
         self.assertFalse(_skip_gdrive_upload(Path("pl_materialy_kontakte.xlsx")))
         self.assertFalse(_skip_gdrive_upload(Path("wyslane/mail.eml")))
 
+    def test_upload_cache_when_env_set(self):
+        env = os.environ.get("GDRIVE_UPLOAD_CACHE")
+        os.environ["GDRIVE_UPLOAD_CACHE"] = "1"
+        try:
+            self.assertFalse(_skip_gdrive_upload(Path("pl_materialy_cache.json")))
+        finally:
+            if env is None:
+                os.environ.pop("GDRIVE_UPLOAD_CACHE", None)
+            else:
+                os.environ["GDRIVE_UPLOAD_CACHE"] = env
+
 
 class GdriveVersionedXlsxTest(unittest.TestCase):
     def test_versions_kontakte_xlsx(self):

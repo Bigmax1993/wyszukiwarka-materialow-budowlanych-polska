@@ -58,6 +58,13 @@ _GDRIVE_SKIP_SUFFIXES = frozenset({".json", ".log"})
 
 
 def _skip_gdrive_upload(path: Path) -> bool:
+    if (os.environ.get("GDRIVE_UPLOAD_CACHE") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return False
     return path.suffix.lower() in _GDRIVE_SKIP_SUFFIXES
 
 

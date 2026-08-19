@@ -89,7 +89,7 @@ jobs:
       - name: Rebuild Excel from all JSON + verify/fill loop
         run: |
           python scripts/rebuild_excel_from_all_artifacts.py \
-            --from-state Wyniki/pl_materialy_contacts_state.json \
+            --from-state --state Wyniki/pl_materialy_contacts_state.json \
             --wyniki Wyniki --wyslane wyslane
 
       - name: Upload Wyniki artifact

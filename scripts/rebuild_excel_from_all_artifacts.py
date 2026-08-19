@@ -36,21 +36,65 @@ def _wyniki_dir(art: Path) -> Path:
 def _artifact_roots(src: Path) -> list[Path]:
     if not src.is_dir():
         return []
-    has_cache = any(src.glob("*_cache.json")) or (src / "Wyniki").is_dir()
-    if has_cache:
+    has_payload = (
+        any(src.glob("*_cache.json"))
+        or any(src.glob("*.xlsx"))
+        or (src / "Wyniki").is_dir()
+    )
+    if has_payload:
         return [src]
     return sorted(p for p in src.iterdir() if p.is_dir())
 
 
+def _cell(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def pipeline_row_as_info(row: dict) -> dict:
+    return {
+        "company_name_clean": _cell(row.get("company_name_clean") or row.get("nazwa")),
+        "company_name": _cell(row.get("nazwa")),
+        "email_target": _cell(row.get("email_target")),
+        "emails_found": _cell(row.get("emails_found")),
+        "phones_found": _cell(row.get("phones_found") or row.get("telefon")),
+        "full_address": _cell(row.get("full_address") or row.get("adres")),
+        "official_website": _cell(row.get("official_website") or row.get("www")),
+        "bundesland": _cell(row.get("bundesland")),
+        "retail_chains_found": _cell(row.get("retail_chains_found")),
+        "email_status": _cell(row.get("email_status")),
+        "retail_verified": bool(row.get("retail_verified")),
+        "is_gu": bool(row.get("is_gu")),
+        "is_small_firm": row.get("is_small_firm", True),
+        "gu_marker": _cell(row.get("gu_marker")),
+    }
+
+
 def collect_raw_contacts(src: Path, logger: logging.Logger) -> dict[str, dict]:
     merged: dict[str, dict] = {}
+    seen_xlsx: set[Path] = set()
     for art in _artifact_roots(src):
         wdir = _wyniki_dir(art)
         for cache_path in wdir.glob("*_cache.json"):
             contacts = recover_contacts_from_cache_file(cache_path)
             logger.info("%s: contacts=%s", cache_path.name, len(contacts))
             merged = merge_contacts_maps(merged, contacts)
-    logger.info("JSON z %s: %s contacts", src, len(merged))
+        for xlsx in list(wdir.glob("*.xlsx")) + list(art.glob("*.xlsx")):
+            resolved = xlsx.resolve()
+            if resolved in seen_xlsx:
+                continue
+            seen_xlsx.add(resolved)
+            rows, _ = scraper.load_existing_output(xlsx, logger)
+            excel_contacts = {}
+            for row in rows:
+                url = _cell(row.get("url") or row.get("www") or row.get("official_website"))
+                if not url:
+                    continue
+                excel_contacts[url] = pipeline_row_as_info(row)
+            logger.info("%s: excel_rows=%s", xlsx.name, len(excel_contacts))
+            merged = merge_contacts_maps(merged, excel_contacts)
+    logger.info("JSON+Excel z %s: %s contacts", src, len(merged))
     return merged
 
 
@@ -236,7 +280,13 @@ def main() -> int:
     parser.add_argument("--src", type=Path, help="Katalog z rozpakowanymi artefaktami")
     parser.add_argument("--state", type=Path, help="Plik stanu scalonych contacts JSON")
     parser.add_argument("--ingest", action="store_true", help="Dolacz jeden artefakt do stanu i zakoncz")
-    parser.add_argument("--from-state", action="store_true", help="Zbuduj Excel ze stanu JSON")
+    parser.add_argument(
+        "--from-state",
+        nargs="?",
+        const=True,
+        default=False,
+        help="Zbuduj Excel ze stanu JSON (opcjonalnie sciezka zamiast --state)",
+    )
     parser.add_argument("--wyniki", type=Path, default=ROOT / "Wyniki")
     parser.add_argument("--wyslane", type=Path, default=ROOT / "wyslane")
     args = parser.parse_args()
@@ -256,9 +306,12 @@ def main() -> int:
         return 0
 
     if args.from_state:
-        if not args.state:
-            raise SystemExit("--from-state wymaga --state")
-        contacts = filter_needed_contacts(load_state_contacts(args.state), logger)
+        state_path = args.state
+        if args.from_state is not True:
+            state_path = Path(args.from_state)
+        if not state_path:
+            raise SystemExit("--from-state wymaga --state albo sciezki")
+        contacts = filter_needed_contacts(load_state_contacts(state_path), logger)
         return finish_excel(contacts, args.wyniki, logger)
 
     if not args.src:

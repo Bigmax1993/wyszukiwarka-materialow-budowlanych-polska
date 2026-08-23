@@ -14,8 +14,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+LIBS = ROOT / "libs"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if str(LIBS) not in sys.path:
+    sys.path.insert(0, str(LIBS))
 
 from scripts.excel_from_json_validate import (  # noqa: E402
     fill_export_from_json,
@@ -25,7 +28,7 @@ from scripts.excel_from_json_validate import (  # noqa: E402
     verify_and_fill_until_complete,
 )
 from scripts.recover_pi_cache_contacts import recover_contacts_from_cache_file  # noqa: E402
-from libs.scraper_email_replies import ReplySyncConfig, write_excel_with_reply_styles  # noqa: E402
+from scraper_email_replies import ReplySyncConfig, write_excel_with_reply_styles  # noqa: E402
 
 CAMPAIGNS = {
     "pl": {

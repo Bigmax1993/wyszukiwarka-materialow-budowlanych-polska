@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import runpy
 import sys
 import unittest
 from pathlib import Path
@@ -82,6 +83,17 @@ class MergeAndFillLoopTests(unittest.TestCase):
         self.assertEqual(by_url["https://a.pl"]["E-mail"], "a@a.pl")
         self.assertEqual(by_url["https://a.pl"]["Telefon"], "500100200")
         self.assertEqual(by_url["https://b.pl"]["E-mail"], "b@b.pl")
+
+
+class VerifyExcelScriptImportTests(unittest.TestCase):
+    def test_verify_excel_from_json_imports_libs_modules(self):
+        ns = runpy.run_path(
+            str(ROOT / "scripts" / "verify_excel_from_json.py"),
+            run_name="verify_excel_from_json_mod",
+        )
+        self.assertIn("ReplySyncConfig", ns)
+        self.assertIn("write_excel_with_reply_styles", ns)
+        self.assertIn("main", ns)
 
 
 if __name__ == "__main__":

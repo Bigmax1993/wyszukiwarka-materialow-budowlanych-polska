@@ -26,31 +26,49 @@ jobs:
       - uses: ./.github/actions/setup-scraper
       - run: pip install -r requirements-drive.txt ijson pandas openpyxl
 
-      - name: Resolve latest wyniki-pi artifact
-        id: art
+      - name: Download latest wyniki-pi artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          PICK=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
-            --jq '[.artifacts[] | select(.expired==false and .name=="pl-materialy-wyniki-pi")] | sort_by(.created_at) | reverse | .[0]')
-          NAME=$(printf '%s' "$PICK" | jq -r '.name' | tr -d '\r')
-          RUN_ID=$(printf '%s' "$PICK" | jq -r '.workflow_run.id' | tr -d '\r')
-          SIZE=$(printf '%s' "$PICK" | jq -r '.size_in_bytes' | tr -d '\r')
-          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
-          echo "run-id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "size=${SIZE}" >> "$GITHUB_OUTPUT"
-          echo "PICKED name=${NAME} run=${RUN_ID} size=${SIZE}"
-          test -n "$NAME"
-          test -n "$RUN_ID"
-
-      - name: Download wyniki-pi
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ steps.art.outputs.name }}
-          github-token: ${{ github.token }}
-          run-id: ${{ steps.art.outputs.run-id }}
-          path: artifact
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+          repo = os.environ["GITHUB_REPOSITORY"]
+          raw = subprocess.check_output(
+              ["gh", "api", f"repos/{repo}/actions/artifacts", "--paginate"],
+              text=True,
+          )
+          # --paginate may concatenate multiple JSON arrays
+          arts = []
+          for chunk in raw.strip().split("\n"):
+              chunk = chunk.strip()
+              if not chunk:
+                  continue
+              data = json.loads(chunk)
+              if isinstance(data, list):
+                  arts.extend(data)
+              elif isinstance(data, dict) and "artifacts" in data:
+                  arts.extend(data["artifacts"])
+          cands = [
+              a for a in arts
+              if (not a.get("expired")) and a.get("name") == "pl-materialy-wyniki-pi"
+          ]
+          if not cands:
+              sys.exit("No pl-materialy-wyniki-pi artifact found")
+          cands.sort(key=lambda a: a.get("created_at") or "", reverse=True)
+          pick = cands[0]
+          run_id = pick["workflow_run"]["id"]
+          name = pick["name"]
+          print(f"PICKED name={name} run={run_id} size={pick.get('size_in_bytes')}")
+          Path("artifact").mkdir(exist_ok=True)
+          subprocess.check_call([
+              "gh", "run", "download", str(run_id),
+              "-n", name,
+              "-D", "artifact",
+              "-R", repo,
+          ])
+          PY
 
       - name: Audit Drive Excel vs artifact cache/excel
         env:
@@ -94,13 +112,17 @@ jobs:
 
           contacts_n = 0
           contact_urls = set()
+          crawl_n = 0
           if art_cache:
               scraper.CACHE_FILE = art_cache[0]
               cache = scraper.load_cache(logger)
               contacts = cache.get('contacts') or {}
               contacts_n = len(contacts)
               contact_urls = {str(u).strip() for u in contacts.keys() if str(u).strip()}
+              crawl = cache.get('website_crawl') or {}
+              crawl_n = len(crawl) if isinstance(crawl, dict) else 0
               print('ARTIFACT_CONTACTS', contacts_n)
+              print('ARTIFACT_WEBSITE_CRAWL', crawl_n)
               for k,v in sorted(((k,len(v)) for k,v in cache.items() if isinstance(v,dict)), key=lambda x:-x[1])[:10]:
                   print(f'  cache_section {k}={v}')
               rows_from_cache = scraper.build_all_rows_from_cache(cache)
@@ -134,20 +156,22 @@ jobs:
           xmeta = next((f for f in files if (f.get('name') or '')=='pl_materialy_kontakte.xlsx'), None)
           cmeta = next((f for f in files if (f.get('name') or '')=='pl_materialy_cache.json'), None)
 
-          drive_urls=set(); drive_stats=None
+          drive_urls=set(); drive_stats=None; drive_rows=0; drive_email=0
           if xmeta:
               with tempfile.TemporaryDirectory() as td:
                   p=Path(td)/'pl_materialy_kontakte.xlsx'
                   g._download_drive_file(service, xmeta['id'], p)
                   drive_stats=count_xlsx(p)
                   print('DRIVE_XLSX_STATS', {k:{'rows':v['rows'],'with_email':v['with_email'],'ncols':len(v['cols'])} for k,v in drive_stats.items()})
-                  print('DRIVE_XLSX_COLS_KONTAKTE', drive_stats.get('Kontakte', drive_stats.get('Kontakty',{})).get('cols'))
-                  drive_urls = drive_stats.get('Kontakte', drive_stats.get('Kontakty', {})).get('urls', set())
+                  kstat = drive_stats.get('Kontakte', drive_stats.get('Kontakty',{}))
+                  print('DRIVE_XLSX_COLS_KONTAKTE', kstat.get('cols'))
+                  drive_urls = kstat.get('urls', set())
+                  drive_rows = kstat.get('rows', 0)
+                  drive_email = kstat.get('with_email') or 0
 
           drive_cache_contacts=None
           if cmeta:
               print('DRIVE_CACHE_SIZE', cmeta.get('size'))
-              # stream count only
               try:
                   import ijson
                   with tempfile.TemporaryDirectory() as td:
@@ -164,9 +188,11 @@ jobs:
 
           # --- diffs ---
           print('COMPARE')
-          print('  drive_xlsx_rows', len(drive_urls))
+          print('  drive_xlsx_rows', drive_rows)
+          print('  drive_xlsx_with_email', drive_email)
           print('  artifact_xlsx_rows', len(art_urls))
           print('  artifact_contacts', contacts_n)
+          print('  artifact_website_crawl', crawl_n)
           only_art = sorted(art_urls - drive_urls)
           only_drive = sorted(drive_urls - art_urls)
           only_contacts = sorted(contact_urls - drive_urls)
@@ -178,12 +204,20 @@ jobs:
           if only_contacts[:10]:
               print('  SAMPLE_CONTACTS_MISSING', only_contacts[:10])
 
-          # verdict
+          # Excel is contact export — not full crawl dump
+          print('NOTE_EXCEL_IS_CONTACT_EXPORT_NOT_FULL_CRAWL')
+          print(f'NOTE_CRAWL_VS_CONTACTS crawl={crawl_n} contacts={contacts_n} drive_xlsx={drive_rows}')
+
           ok_contacts = len(only_contacts)==0
           ok_art = len(only_art)==0
           print('VERDICT_CONTAINS_ALL_ARTIFACT_CONTACTS', ok_contacts)
           print('VERDICT_CONTAINS_ALL_ARTIFACT_XLSX', ok_art)
-          if not (ok_contacts and ok_art):
-              raise SystemExit('INCOMPLETE: Drive Excel does not contain all source rows')
-          print('VERDICT_OK_ALL_KNOWN_SOURCES_PRESENT')
+          # Pass if Drive has every contact+artifact-xlsx URL; crawl>>contacts is expected
+          if contacts_n and not ok_contacts:
+              raise SystemExit('INCOMPLETE: Drive Excel missing artifact contacts')
+          if art_urls and not ok_art:
+              raise SystemExit('INCOMPLETE: Drive Excel missing artifact xlsx rows')
+          if drive_rows <= 0:
+              raise SystemExit('INCOMPLETE: Drive Excel empty')
+          print('VERDICT_OK_ALL_KNOWN_CONTACT_SOURCES_PRESENT')
           PY

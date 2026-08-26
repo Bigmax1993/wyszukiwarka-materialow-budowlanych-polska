@@ -1,0 +1,135 @@
+name: PL refill missing Excel contacts
+
+# Braki w Excelu → Serper + crawl Claude + luźny regex → nadpisz Excel (+ Drive).
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max firm do uzupełnienia w tym runie"
+        required: false
+        default: "40"
+        type: string
+      upload_drive:
+        description: "Wgraj Excel na Google Drive"
+        required: false
+        type: boolean
+        default: true
+      artifact_name:
+        description: "Artefakt źródłowy (puste = najnowszy full/pi/thu)"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: pl-pipeline
+  cancel-in-progress: false
+
+env:
+  SCRAPER_TIMEZONE: Europe/Warsaw
+  KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+  RELAXED_CONTACT_REGEX: "1"
+  VERIFY_EXCEL_AFTER_SAVE: "0"
+  GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
+  GDRIVE_VERSION_XLSX: "0"
+  GDRIVE_APPEND_XLSX: "0"
+  GDRIVE_CONSOLIDATE_ALL_XLSX: "0"
+
+jobs:
+  refill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-scraper
+
+      - name: Install Drive deps + ijson
+        run: pip install -r requirements-drive.txt ijson
+
+      - name: Resolve source artifact
+        id: art
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FORCED="${{ github.event.inputs.artifact_name }}"
+          ALL=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
+            --paginate --jq '.artifacts[] | select(.expired==false)')
+          pick_latest() {
+            local name="$1"
+            echo "$ALL" | jq -s --arg n "$name" \
+              '[.[] | select(.name == $n)] | sort_by(.created_at) | reverse | .[0] // empty'
+          }
+          PICK=""
+          if [ -n "$FORCED" ]; then
+            PICK=$(pick_latest "$FORCED")
+          else
+            for NAME in pl-materialy-wyniki-pi pl-materialy-wyniki-thu pl-materialy-wyniki-fri pl-materialy-wyniki-refill; do
+              CAND=$(pick_latest "$NAME")
+              if [ -n "$CAND" ] && [ "$CAND" != "null" ]; then
+                PICK="$CAND"
+                break
+              fi
+            done
+          fi
+          if [ -z "$PICK" ] || [ "$PICK" = "null" ]; then
+            echo "::error::Brak artefaktu Wyniki"
+            exit 1
+          fi
+          echo "artifact=$(echo "$PICK" | jq -r '.name')" >> "$GITHUB_OUTPUT"
+          echo "run-id=$(echo "$PICK" | jq -r '.workflow_run.id')" >> "$GITHUB_OUTPUT"
+
+      - name: Download Wyniki artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.art.outputs.artifact }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.art.outputs.run-id }}
+          path: .
+
+      - name: Ensure Excel exists (rebuild from crawl if needed)
+        run: |
+          if [ ! -f Wyniki/pl_materialy_kontakte.xlsx ]; then
+            python scripts/rebuild_excel_full_from_cache.py
+          fi
+
+      - name: Refill missing (Serper + Claude + relaxed regex)
+        env:
+          REFILL_MISSING_LIMIT: ${{ github.event.inputs.limit || '40' }}
+        run: |
+          python scripts/refill_missing_excel_contacts.py --limit "$REFILL_MISSING_LIMIT"
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+          p = Path("Wyniki/pl_materialy_kontakte.xlsx")
+          df = pd.read_excel(p, sheet_name="Kontakte").fillna("")
+          print("rows", len(df))
+          print("email", sum(1 for v in df.get("E-mail", []) if str(v).strip()))
+          print("phone", sum(1 for v in df.get("Telefon", []) if str(v).strip()))
+          print("addr", sum(1 for v in df.get("Adres", []) if str(v).strip()))
+          PY
+
+      - name: Upload Excel to Google Drive
+        if: github.event.inputs.upload_drive != 'false'
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
+          GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
+          GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
+          GDRIVE_IMPERSONATE_EMAIL: ${{ secrets.GDRIVE_IMPERSONATE_EMAIL }}
+          GDRIVE_SHARED_DRIVE_ID: ${{ secrets.GDRIVE_SHARED_DRIVE_ID }}
+        run: |
+          python scripts/gdrive_upload_wyniki.py --campaign-dir . --campaign pl
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pl-materialy-wyniki-refill
+          path: |
+            Wyniki/
+          if-no-files-found: warn

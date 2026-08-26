@@ -32,6 +32,10 @@ def merge_claude_contacts_into_collected(collected: dict, parsed: dict) -> dict:
     if parsed.get("company_name") and not out.get("company_name"):
         out["company_name"] = parsed["company_name"]
 
+    addr = (parsed.get("full_address") or parsed.get("address") or "").strip()
+    if addr and not (out.get("full_address") or "").strip():
+        out["full_address"] = addr
+
     out["emails"] = emails
     out["impressum_emails"] = impressum_emails
     out["phones"] = phones

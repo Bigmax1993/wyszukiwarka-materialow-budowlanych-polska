@@ -147,6 +147,7 @@ def test_sunday_backfill_verifies_excel_from_json_and_uploads_drive():
     assert "gdrive_upload_wyniki.py" in text
     assert "GDRIVE_FOLDER_ID_PL" in text
     assert "--campaign pl" in text
+    assert "refill_missing_excel_contacts.py" in text
 
 
 @pytest.mark.parametrize(

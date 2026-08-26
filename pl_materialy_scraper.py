@@ -3941,9 +3941,32 @@ _PAGE_EMAIL_RE = re.compile(
     rf"[a-z0-9\-]{{2,{CONTACT_EMAIL_DOMAIN_LABEL_MAX}}}",
     re.IGNORECASE,
 )
+# Luźniejszy e-mail (gap-fill): krótszy local, więcej znaków w domenie, PL TLD.
+_PAGE_EMAIL_RE_RELAXED = re.compile(
+    r"[a-z0-9._%+\-]{1,64}@[a-z0-9.\-]{1,80}\.[a-z0-9\-.]{2,24}",
+    re.IGNORECASE,
+)
 _PHONE_TEXT_RE = re.compile(
     rf"(?:\+49|0049|0)[\s\-/]?(?:\(?\d{{1,5}}\)?[\s\-/]?)?[\d\s\-/]{{1,{CONTACT_DATA_TOKEN_MAX}}}\d"
 )
+# Luźniejszy telefon PL/DE (gap-fill): +48 / 0048 / gołe 9-cyfrowe / stacjonarne.
+_PHONE_TEXT_RE_RELAXED = re.compile(
+    r"(?:(?:\+|00)(?:48|49)[\s\-/]?)?(?:\(?\d{2,3}\)?[\s\-/]?)?(?:\d[\s\-/]?){6,12}\d"
+    r"|(?<!\d)\d{9}(?!\d)"
+    r"|(?<!\d)\d{2,3}[\s\-/]\d{3}[\s\-/]\d{2}[\s\-/]\d{2}(?!\d)"
+    r"|(?<!\d)\d{2,3}[\s\-/]\d{2,3}[\s\-/]\d{2,3}(?!\d)"
+)
+
+# Włączane w gap-fill (refill braków) — bardziej permisywny regex e-mail/telefon.
+RELAXED_CONTACT_REGEX = (
+    (os.environ.get("RELAXED_CONTACT_REGEX") or "").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+
+
+def set_relaxed_contact_regex(enabled: bool) -> None:
+    global RELAXED_CONTACT_REGEX
+    RELAXED_CONTACT_REGEX = bool(enabled)
 
 
 def _deobfuscate_contact_text(text: str) -> str:
@@ -3956,6 +3979,12 @@ def _deobfuscate_contact_text(text: str) -> str:
         (r"\s*\(punkt\)\s*", "."),
         (r"\s+punkt\s+", "."),
         (r"\s*\[punkt\]\s*", "."),
+        (r"\s*\[małpa\]\s*", "@"),
+        (r"\s*\(małpa\)\s*", "@"),
+        (r"\s+małpa\s+", "@"),
+        (r"\s*\[malpa\]\s*", "@"),
+        (r"\s*\(malpa\)\s*", "@"),
+        (r"\s+malpa\s+", "@"),
     ):
         out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
     return out
@@ -3965,6 +3994,12 @@ def _email_within_contact_limits(email: str) -> bool:
     if not email or "@" not in email:
         return False
     local, _, domain = email.partition("@")
+    if RELAXED_CONTACT_REGEX:
+        if len(local) < 1 or len(local) > 64:
+            return False
+        if len(domain) < 3 or len(domain) > 120:
+            return False
+        return True
     if len(local) < CONTACT_EMAIL_LOCAL_MIN or len(local) > CONTACT_EMAIL_LOCAL_MAX:
         return False
     for label in domain.lower().split("."):
@@ -3974,6 +4009,9 @@ def _email_within_contact_limits(email: str) -> bool:
 
 
 def _phone_raw_within_contact_limits(raw: str) -> bool:
+    if RELAXED_CONTACT_REGEX:
+        digits = sum(1 for c in (raw or "") if c.isdigit())
+        return 7 <= digits <= 15 and len((raw or "").strip()) <= 40
     return len((raw or "").strip()) <= CONTACT_DATA_TOKEN_MAX
 
 
@@ -3981,10 +4019,16 @@ def _find_emails_in_text_regex(text: str) -> list[str]:
     if not text:
         return []
     emails: list[str] = []
-    for raw in _PAGE_EMAIL_RE.findall(_deobfuscate_contact_text(text)):
+    pattern = _PAGE_EMAIL_RE_RELAXED if RELAXED_CONTACT_REGEX else _PAGE_EMAIL_RE
+    for raw in pattern.findall(_deobfuscate_contact_text(text)):
         norm = _normalize_href_email(raw)
         if norm and _email_within_contact_limits(norm) and norm not in emails:
             emails.append(norm)
+    if RELAXED_CONTACT_REGEX:
+        # Gap-fill: filtr komercyjny tylko na oczywiste śmieci (nie blokuj info@/biuro@).
+        from commercial_contact_filter import is_junk_scraped_email
+
+        return [e for e in emails if not is_junk_scraped_email(e)]
     return filter_commercial_emails(emails)
 
 
@@ -3992,12 +4036,14 @@ def _find_phones_in_text_regex(text: str) -> list[str]:
     if not text:
         return []
     phones: list[str] = []
-    for raw in _PHONE_TEXT_RE.findall(text):
+    pattern = _PHONE_TEXT_RE_RELAXED if RELAXED_CONTACT_REGEX else _PHONE_TEXT_RE
+    for raw in pattern.findall(text):
         if not _phone_raw_within_contact_limits(raw):
             continue
         norm = _normalize_href_phone(raw)
-        if norm and len(norm) <= CONTACT_DATA_TOKEN_MAX and norm not in phones:
-            phones.append(norm)
+        if norm and len(norm) <= (40 if RELAXED_CONTACT_REGEX else CONTACT_DATA_TOKEN_MAX):
+            if norm not in phones:
+                phones.append(norm)
     return phones
 
 
@@ -5634,6 +5680,7 @@ def enrich_row_with_contacts(
     logger: logging.Logger,
     *,
     force_refresh: bool | None = None,
+    gap_fill: bool = False,
 ) -> dict:
     row = normalize_row_company_name(row)
     place_url = row.get("url", "")
@@ -5643,6 +5690,8 @@ def enrich_row_with_contacts(
         if force_refresh is None
         else force_refresh
     )
+    if gap_fill:
+        refresh = True
     if place_url in contacts_cache and not refresh:
         console_step(f"Kontakt-Cache: {row.get('nazwa', '')}")
         cached = contacts_cache[place_url]
@@ -5658,9 +5707,11 @@ def enrich_row_with_contacts(
     if not website and (place_url or "").strip().lower().startswith(("http://", "https://")):
         website = normalize_website(place_url)
     serper_source_score = 0
-    # Serper tylko gdy brak www w JSON/wierszu; przy reverify (force_refresh) nie odświeżamy URL z API
+    # Serper: brak www, FORCE_SERPER, albo gap-fill (zawsze dopytaj o firmę).
     need_serper = not website
     if website and FORCE_SERPER_LOOKUP and not refresh:
+        need_serper = True
+    if gap_fill:
         need_serper = True
     if need_serper:
         serper_query = build_company_query_from_row(row)
@@ -5714,7 +5765,7 @@ def enrich_row_with_contacts(
         row["is_small_firm"] = verification.get("is_small_firm", False)
         row["is_gu"] = verification.get("is_gu", False)
         row["gu_marker"] = verification.get("gu_marker", "")
-        if not verification.get("verified"):
+        if not verification.get("verified") and not gap_fill:
             console_step(
                 f"Odrzucono (brak Einzelhandel/Hochbau-Filialbau): "
                 f"{company_for_email} — {row['verification_reason']}"
@@ -5740,6 +5791,11 @@ def enrich_row_with_contacts(
             row.update(extra)
             contacts_cache[place_url] = {k: row.get(k) for k in extra if k in row}
             return normalize_row_company_name(row)
+        if not verification.get("verified") and gap_fill:
+            console_step(
+                f"gap_fill: crawl mimo braku retail proof — {company_for_email} "
+                f"({row.get('verification_reason')})"
+            )
     elif website:
         row["retail_verified"] = True
     else:
@@ -5769,6 +5825,12 @@ def enrich_row_with_contacts(
     )
     if verification.get("page_snippet"):
         collected["page_snippet"] = verification["page_snippet"]
+    # Adres z crawla (gap-fill / braki).
+    if collected.get("full_address") and not (
+        row.get("full_address") or row.get("adres") or ""
+    ).strip():
+        row["full_address"] = collected["full_address"]
+        row["adres"] = collected["full_address"]
     row = reconcile_contact_sources(row, collected)
     subject = ""
     body = ""
@@ -5792,8 +5854,18 @@ def enrich_row_with_contacts(
         retail_verified=bool(row.get("retail_verified")),
         verification_text=verify_context,
     )
-    if (
+    need_claude = (
         not target_email
+        or (
+            gap_fill
+            and (
+                not (row.get("telefon") or row.get("phones_found") or collected.get("phones"))
+                or not (row.get("full_address") or row.get("adres") or "").strip()
+            )
+        )
+    )
+    if (
+        need_claude
         and ENABLE_CLAUDE_CONTACT_EXTRACT
         and website
     ):
@@ -5807,7 +5879,8 @@ def enrich_row_with_contacts(
             )
 
             console_step(
-                f"Claude Kontaktsuche (kein E-Mail per Regex): {website}"
+                f"Claude Kontaktsuche"
+                f"{' (gap_fill)' if gap_fill else ' (kein E-Mail per Regex)'}: {website}"
             )
             parsed = claude_extract_contacts_from_pages(
                 company_for_email,
@@ -5818,8 +5891,20 @@ def enrich_row_with_contacts(
                 cache_key=place_url,
                 on_step=console_step,
             )
-            if parsed and (parsed.get("emails") or parsed.get("phones")):
+            if parsed and (
+                parsed.get("emails")
+                or parsed.get("phones")
+                or parsed.get("address")
+                or parsed.get("full_address")
+            ):
                 collected = merge_claude_contacts_into_collected(collected, parsed)
+                addr = (
+                    (parsed.get("full_address") or parsed.get("address") or "")
+                ).strip()
+                if addr and not (row.get("full_address") or row.get("adres") or "").strip():
+                    row["full_address"] = addr
+                    row["adres"] = addr
+                    collected["full_address"] = addr
                 row = reconcile_contact_sources(row, collected)
                 target_email, email_score, email_pick_method = (
                     resolve_inquiry_email_target(
@@ -5835,7 +5920,7 @@ def enrich_row_with_contacts(
                 )
                 if target_email:
                     email_pick_method = "claude_extract"
-    if target_email and is_non_commercial_email(target_email):
+    if target_email and is_non_commercial_email(target_email) and not gap_fill:
         target_email = ""
         email_pick_method = "blocked_institution"
     if is_blocked_non_commercial_row(
@@ -5845,37 +5930,56 @@ def enrich_row_with_contacts(
             "www": website,
             "nazwa": company_for_email,
         }
-    ):
+    ) and not gap_fill:
         target_email = ""
         email_pick_method = "blocked_institution"
         mail_status = "skipped_institution"
     elif not target_email and collected.get("emails"):
         mail_status = "no_suitable_email"
+    # Nie nadpisuj istniejących pól pustymi z gap-fill.
+    prev_email = (row.get("email_target") or "").strip()
+    prev_phone = (row.get("telefon") or row.get("phones_found") or "").strip()
+    prev_addr = (row.get("full_address") or row.get("adres") or "").strip()
+    phones_joined = ", ".join(collected.get("phones") or [])
+    if not phones_joined and prev_phone:
+        phones_joined = prev_phone
+    email_out = target_email or prev_email
+    addr_out = (
+        (collected.get("full_address") or row.get("full_address") or row.get("adres") or "")
+        or prev_addr
+    ).strip()
     extra = {
         "company_name": row.get("company_name_clean") or row.get("nazwa", ""),
         "company_name_raw": row.get("company_name_raw", ""),
         "company_name_clean": row.get("company_name_clean", ""),
-        "official_website": collected["website"],
+        "official_website": collected.get("website") or website,
         "serper_source_score": serper_source_score,
-        "emails_found": ", ".join(collected["emails"]),
+        "emails_found": ", ".join(collected.get("emails") or [])
+        or (row.get("emails_found") or ""),
         "impressum_emails_found": ", ".join(collected.get("impressum_emails") or []),
-        "phones_found": ", ".join(collected["phones"]),
-        "contact_sources": ", ".join(collected["source_urls"]),
+        "phones_found": phones_joined,
+        "telefon": (phones_joined.split(",", 1)[0].strip() if phones_joined else prev_phone),
+        "full_address": addr_out,
+        "adres": addr_out,
+        "contact_sources": ", ".join(collected.get("source_urls") or []),
         "contact_source": row.get("contact_source", "serper"),
         "maps_contact_rejected": row.get("maps_contact_rejected", "no"),
-        "email_target": target_email,
+        "email_target": email_out,
         "email_target_score": email_score,
         "email_pick_method": email_pick_method,
         "email_subject": subject,
         "email_body": body,
         "email_status": mail_status,
-        "retail_verified": verification.get("verified", False),
+        "retail_verified": verification.get("verified", False) or bool(row.get("retail_verified")),
         "verification_reason": verification.get("verification_reason", "ok"),
-        "retail_chains_found": ", ".join(verification.get("retail_chains") or []),
+        "retail_chains_found": ", ".join(verification.get("retail_chains") or [])
+        or (row.get("retail_chains_found") or ""),
         "is_small_firm": verification.get("is_small_firm", True),
         "is_gu": verification.get("is_gu", False),
         "gu_marker": verification.get("gu_marker", ""),
     }
+    if gap_fill:
+        extra["gap_fill"] = "1"
     extra["contact_quality_score"] = compute_contact_quality_score({**row, **extra})
     row.update(extra)
     contacts_cache[place_url] = extra
@@ -6875,6 +6979,26 @@ if __name__ == "__main__":
                 f"  Excel → {OUTPUT_FILE} ({len(all_rows)} wierszy pipeline)"
             )
             raise SystemExit(0)
+        if "--refill-missing-contacts" in sys.argv:
+            from scripts.refill_missing_excel_contacts import refill_missing
+
+            logger = setup_logging()
+            limit = 40
+            if "--limit" in sys.argv:
+                i = sys.argv.index("--limit")
+                if i + 1 < sys.argv:
+                    try:
+                        limit = int(sys.argv[i + 1])
+                    except ValueError:
+                        pass
+            dry = "--dry-run" in sys.argv
+            stats = refill_missing(limit=limit, dry_run=dry, logger=logger)
+            print(
+                f"[REFILL] processed={stats['processed']} "
+                f"email+={stats['filled_email']} phone+={stats['filled_phone']} "
+                f"addr+={stats['filled_address']} errors={stats['errors']}"
+            )
+            raise SystemExit(0 if stats["processed"] or dry else 1)
         if "--verify-pending-contacts" in sys.argv:
             logger = setup_logging()
             cache = load_cache(logger)

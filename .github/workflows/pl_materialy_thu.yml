@@ -72,6 +72,16 @@ jobs:
           python pl_materialy_scraper.py $CFG --backfill-emails-from-cache
           python pl_materialy_scraper.py $CFG --rebuild-from-cache
 
+      - name: Refill missing contacts (Serper + Claude crawl + relaxed regex)
+        env:
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RELAXED_CONTACT_REGEX: "1"
+          REFILL_MISSING_LIMIT: "50"
+          VERIFY_EXCEL_AFTER_SAVE: "0"
+        run: |
+          python scripts/refill_missing_excel_contacts.py --limit "${REFILL_MISSING_LIMIT}"
+
       - name: Install Google Drive dependencies
         run: pip install -r requirements-drive.txt
 

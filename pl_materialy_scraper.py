@@ -183,7 +183,6 @@ from scraper_runtime_limit import (
 from scraper_email_replies import (
     ReplySyncConfig,
     mark_email_sent,
-    merge_export_row,
     write_excel_with_reply_styles,
 )
 from de_contractor_exclusions import (
@@ -862,6 +861,14 @@ def build_excel_info_sheet_rows() -> list[dict]:
             ),
         },
         {
+            "Temat": "Kolumny Excel",
+            "Wartość": (
+                "Tylko dane firm (Kontakte/Wojewodztwa). Bez kolumn odpowiedzi/cen: "
+                "Status maila, Wysłano, Odpowiedź, Cena, Ceny (wszystkie), Cena rel., "
+                "Waluta, Opis, Zadzwoń?, Źródło ceny, Wymaga interwencji itd."
+            ),
+        },
+        {
             "Temat": "Google Drive — jeden plik",
             "Wartość": (
                 "Wszystkie pliki Excel z folderu Drive są scalane (append wierszy po URL) "
@@ -904,6 +911,7 @@ def save_excel(
             xlsx_path=path,
             lang="pl",
             campaign_id="pl_materialy",
+            include_reply_export_columns=False,
         )
         try:
             write_excel_with_reply_styles(
@@ -930,6 +938,7 @@ def save_excel(
                 xlsx_path=alt,
                 lang="pl",
                 campaign_id="pl_materialy",
+                include_reply_export_columns=False,
             )
             write_excel_with_reply_styles(
                 alt,
@@ -1663,8 +1672,6 @@ def build_export_rows(rows, logger=None, cache=None, require_eligible=True):
             "Znacznik GU": (row.get("gu_marker") or "").strip(),
             "Status": _excel_status_label(row),
         }
-        if cache is not None and email:
-            base = merge_export_row(base, cache, email, lang="pl")
         export_rows.append(base)
     if logger is not None:
         with_mail = sum(1 for r in export_rows if (r.get("E-mail") or "").strip())

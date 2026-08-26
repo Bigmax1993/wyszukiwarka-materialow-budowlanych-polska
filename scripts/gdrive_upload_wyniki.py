@@ -529,9 +529,14 @@ def read_xlsx_sheets_normalized(path: Path, scraper) -> dict[str, list[dict]]:
 
 
 def order_sheet_columns(sheet: str, rows: list[dict], scraper) -> list[dict]:
-    """Unia kolumn: najpierw kanoniczne PL, potem pozostałe (CRM itd.)."""
+    """Unia kolumn: najpierw kanoniczne PL, potem pozostałe (bez kolumn odpowiedzi/cen)."""
     if not rows:
         return rows
+    libs = ROOT / "libs"
+    if str(libs) not in sys.path:
+        sys.path.insert(0, str(libs))
+    from scraper_email_replies import is_reply_export_column, strip_reply_export_columns
+
     preferred: list[str] = []
     if sheet == _SHEET_KONTAKTE:
         preferred = list(scraper.EXPORT_COLUMNS)
@@ -542,14 +547,24 @@ def order_sheet_columns(sheet: str, rows: list[dict], scraper) -> list[dict]:
     cols: list[str] = []
     seen: set[str] = set()
     for col in preferred:
+        if is_reply_export_column(col):
+            continue
         if any(col in r for r in rows):
             cols.append(col)
             seen.add(col)
     extras = sorted(
-        {k for r in rows for k in r.keys() if k not in seen and not str(k).startswith("_")}
+        {
+            k
+            for r in rows
+            for k in r.keys()
+            if k not in seen
+            and not str(k).startswith("_")
+            and not is_reply_export_column(k)
+        }
     )
     cols.extend(extras)
-    return [{c: r.get(c, "") for c in cols} for r in rows]
+    cleaned = [strip_reply_export_columns(r) for r in rows]
+    return [{c: r.get(c, "") for c in cols} for r in cleaned]
 
 
 def write_consolidated_xlsx(
@@ -592,6 +607,7 @@ def write_consolidated_xlsx(
         lang="pl",
         campaign_id="pl_materialy",
         main_sheet_names=(_SHEET_KONTAKTE, "Kontakty", "Baza firm"),
+        include_reply_export_columns=False,
     )
     cache = {}
     try:

@@ -121,6 +121,7 @@ def write_sheets(
         xlsx_path=xlsx,
         lang=spec["lang"],
         campaign_id=spec["campaign_id"],
+        include_reply_export_columns=spec.get("campaign_id") != "pl_materialy",
     )
     write_excel_with_reply_styles(
         xlsx,

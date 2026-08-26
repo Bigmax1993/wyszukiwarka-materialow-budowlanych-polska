@@ -90,6 +90,44 @@ REPLY_EXPORT_COLUMNS = [
     "Zadzwoń?",
 ]
 
+# Kolumny CRM/odpowiedzi — kampania PL materiały ich nie eksportuje (nigdy).
+_REPLY_EXPORT_COLUMN_ALIASES = frozenset(
+    {
+        *REPLY_EXPORT_COLUMNS,
+        "Odpowiedz",
+        "Cena(wszystkie)",
+        "Cena (wszystkie)",
+        "Zrodlo ceny",
+        "Źródlo ceny",
+        "Zadzwoń",
+        "Zadzwon?",
+        "Zadzwon",
+    }
+)
+_REPLY_EXPORT_COLUMN_PREFIXES = ("cena rel.", "cena rel")
+
+
+def is_reply_export_column(name: str) -> bool:
+    raw = str(name or "").strip()
+    if not raw or raw.startswith("_"):
+        return False
+    if raw in _REPLY_EXPORT_COLUMN_ALIASES:
+        return True
+    low = raw.lower()
+    if any(low.startswith(p) for p in _REPLY_EXPORT_COLUMN_PREFIXES):
+        return True
+    # dopasowanie bez polskich znaków / zbędnych spacji
+    compact = "".join(ch for ch in low if ch.isalnum())
+    aliases_compact = {
+        "".join(ch for ch in a.lower() if ch.isalnum()) for a in _REPLY_EXPORT_COLUMN_ALIASES
+    }
+    return compact in aliases_compact
+
+
+def strip_reply_export_columns(row: dict) -> dict:
+    """Usuwa kolumny odpowiedzi/cen z wiersza eksportu."""
+    return {k: v for k, v in (row or {}).items() if not is_reply_export_column(k)}
+
 ORANGE_FILL_RGB = "FFFFE699"
 
 # Kotwice relacji (transport PL) — dopasowanie cen w tekście/OCR
@@ -234,6 +272,8 @@ class ReplySyncConfig:
     imap_days_back: int = 14
     main_sheet_names: tuple[str, ...] = ("Kontakte", "Kontakty", "Baza firm")
     email_column: str = "E-mail"
+    # PL materiały: False — bez Status maila / Cena / Odpowiedź / itd.
+    include_reply_export_columns: bool = True
 
 
 UNKNOWN_COMPANY_LABEL_PL = "Nieznana firma"
@@ -2455,6 +2495,13 @@ def write_excel_with_reply_styles(
             enriched = []
             for row in rows:
                 r = normalize_row_dict(dict(row))
+                if not config.include_reply_export_columns:
+                    r = strip_reply_export_columns(r)
+                    r["_call_needed"] = False
+                    r["_intervention_unread"] = False
+                    r["_reply_questions"] = False
+                    enriched.append(r)
+                    continue
                 em = (r.get(config.email_column) or r.get("E-mail") or "").strip()
                 contact = find_contact_by_export_email(cache, em) if em else None
                 if contact:
@@ -2505,8 +2552,17 @@ def write_excel_with_reply_styles(
     logger.info(f"Zapisano Excel ze stylami: {path}")
 
 
-def merge_export_row(base: dict, cache: dict, email_value: str, lang: str = "pl") -> dict:
+def merge_export_row(
+    base: dict,
+    cache: dict,
+    email_value: str,
+    lang: str = "pl",
+    *,
+    include_reply_export_columns: bool = True,
+) -> dict:
     row = dict(base)
+    if not include_reply_export_columns:
+        return strip_reply_export_columns(row)
     contact = find_contact_by_export_email(cache, email_value)
     if contact:
         row.update(export_columns_from_contact(contact, lang))

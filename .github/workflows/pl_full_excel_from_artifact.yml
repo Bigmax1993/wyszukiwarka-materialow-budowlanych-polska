@@ -86,49 +86,27 @@ jobs:
           run-id: ${{ steps.art.outputs.run-id }}
           path: .
 
-      - name: Count contacts + rebuild Excel (all rows)
+      - name: Count contacts + rebuild Excel (all rows + enrichment + verified)
         env:
           ELIGIBLE_ONLY: ${{ github.event.inputs.eligible_only }}
         run: |
+          ARGS=""
+          if [ "${ELIGIBLE_ONLY}" = "true" ]; then
+            ARGS="--eligible-only"
+          fi
+          python scripts/rebuild_excel_full_from_cache.py $ARGS
           python - <<'PY'
-          import json, logging, os, sys
+          import pandas as pd
           from pathlib import Path
-          ROOT = Path(".").resolve()
-          sys.path[:0] = [str(ROOT), str(ROOT / "libs"), str(ROOT / "scripts")]
-          logging.basicConfig(level=logging.INFO, format="%(message)s")
-          logger = logging.getLogger("full_excel")
-          import pl_materialy_scraper as scraper
-
-          cache_path = Path("Wyniki/pl_materialy_cache.json")
-          if not cache_path.is_file():
-              # czasem artefakt ma flat layout
-              hits = list(Path(".").rglob("pl_materialy_cache.json"))
-              if not hits:
-                  raise SystemExit("Brak pl_materialy_cache.json w artefakcie")
-              cache_path = hits[0]
-          print(f"CACHE={cache_path} size={cache_path.stat().st_size}")
-          scraper.CACHE_FILE = cache_path
-          scraper.OUTPUT_DIR = Path("Wyniki")
-          scraper.OUTPUT_DIR.mkdir(exist_ok=True)
-          scraper.OUTPUT_FILE = scraper.OUTPUT_DIR / "pl_materialy_kontakte.xlsx"
-
-          cache = scraper.load_cache(logger)
-          contacts = cache.get("contacts") or {}
-          print(f"contacts={len(contacts)}")
-          for k, v in sorted(cache.items(), key=lambda kv: -len(kv[1]) if isinstance(kv[1], dict) else 0)[:12]:
-              if isinstance(v, dict):
-                  print(f"  section {k}: {len(v)}")
-
-          existing, _ = scraper.load_existing_output(scraper.OUTPUT_FILE, logger)
-          rows = scraper.build_all_rows_from_cache(cache)
-          merged = scraper.merge_pipeline_rows(existing, rows)
-          eligible = (os.environ.get("ELIGIBLE_ONLY") or "").lower() == "true"
-          export = scraper.build_export_rows(merged, logger=logger, cache=cache, require_eligible=eligible)
-          print(f"pipeline={len(merged)} export={len(export)} eligible={eligible}")
-          with_mail = sum(1 for r in export if (r.get("E-mail") or "").strip())
-          print(f"with_email={with_mail}")
-          scraper.save_excel(merged, scraper.OUTPUT_FILE, logger, cache=cache, require_eligible=eligible)
-          print(f"WROTE {scraper.OUTPUT_FILE} bytes={scraper.OUTPUT_FILE.stat().st_size}")
+          p = Path("Wyniki/pl_materialy_kontakte.xlsx")
+          df = pd.read_excel(p, sheet_name="Kontakte").fillna("")
+          print("Kontakte rows", len(df))
+          print("with_email", sum(1 for v in df.get("E-mail", []) if str(v).strip()))
+          print("with_address", sum(1 for v in df.get("Adres", []) if str(v).strip()))
+          print("columns", list(df.columns))
+          banned = ["Status maila", "Wysłano", "Odpowiedź", "Cena", "Waluta", "Opis", "Zadzwoń?"]
+          bad = [c for c in df.columns if c in banned or str(c).startswith("Cena rel")]
+          assert not bad, bad
           PY
 
       - name: Upload Excel to Google Drive

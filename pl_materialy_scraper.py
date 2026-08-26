@@ -1986,7 +1986,7 @@ def row_from_cache_contact(place_url: str, info: dict) -> dict | None:
 
 
 def merge_pipeline_rows(existing: list[dict], incoming: list[dict]) -> list[dict]:
-    """Łączy wiersze pipeline po URL (incoming nadpisuje pola istniejących)."""
+    """Łączy wiersze pipeline po URL (incoming nadpisuje tylko niepuste pola)."""
     by_url = index_all_rows_by_url(list(existing))
     merged = list(existing)
     for row in incoming:
@@ -1994,7 +1994,15 @@ def merge_pipeline_rows(existing: list[dict], incoming: list[dict]) -> list[dict
         if not url:
             continue
         if url in by_url:
-            by_url[url].update(row)
+            cur = by_url[url]
+            for key, val in row.items():
+                if val is None:
+                    continue
+                if isinstance(val, str) and not val.strip():
+                    continue
+                if val == "" or val == [] or val == {}:
+                    continue
+                cur[key] = val
         else:
             merged.append(row)
             by_url[url] = row

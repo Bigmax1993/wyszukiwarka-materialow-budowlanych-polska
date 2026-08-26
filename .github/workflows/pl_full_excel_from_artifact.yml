@@ -91,16 +91,39 @@ jobs:
           ELIGIBLE_ONLY: ${{ github.event.inputs.eligible_only }}
           VERIFY_EXCEL_AFTER_SAVE: "0"
         run: |
+          mkdir -p Wyniki
+          # Artefakt bywa płaski (root) albo z katalogiem Wyniki/
+          if [ ! -f Wyniki/pl_materialy_cache.json ] && [ -f pl_materialy_cache.json ]; then
+            mv -f pl_materialy_cache.json Wyniki/ || true
+          fi
+          if [ ! -f Wyniki/pl_materialy_kontakte.xlsx ] && [ -f pl_materialy_kontakte.xlsx ]; then
+            mv -f pl_materialy_kontakte.xlsx Wyniki/ || true
+          fi
           ARGS=""
           if [ "${ELIGIBLE_ONLY}" = "true" ]; then
             ARGS="--eligible-only"
           fi
-          python scripts/rebuild_excel_full_from_cache.py $ARGS
+          python scripts/rebuild_excel_full_from_cache.py --cache Wyniki/pl_materialy_cache.json --xlsx Wyniki/pl_materialy_kontakte.xlsx $ARGS
+          # Gdy skrypt zapisał do CWD — przenieś do Wyniki
+          if [ ! -f Wyniki/pl_materialy_kontakte.xlsx ]; then
+            hit=$(find . -name 'pl_materialy_kontakte.xlsx' | head -n 1)
+            if [ -n "$hit" ]; then
+              mkdir -p Wyniki
+              cp -f "$hit" Wyniki/pl_materialy_kontakte.xlsx
+            fi
+          fi
           python scripts/verify_excel_from_json.py --campaign pl --wyniki Wyniki || true
           python - <<'PY'
           import pandas as pd
           from pathlib import Path
+          hits = list(Path(".").rglob("pl_materialy_kontakte.xlsx"))
+          assert hits, "brak pl_materialy_kontakte.xlsx"
           p = Path("Wyniki/pl_materialy_kontakte.xlsx")
+          if not p.is_file():
+              p = hits[0]
+              Path("Wyniki").mkdir(exist_ok=True)
+              Path("Wyniki/pl_materialy_kontakte.xlsx").write_bytes(p.read_bytes())
+              p = Path("Wyniki/pl_materialy_kontakte.xlsx")
           df = pd.read_excel(p, sheet_name="Kontakte").fillna("")
           print("Kontakte rows", len(df))
           print("with_email", sum(1 for v in df.get("E-mail", []) if str(v).strip()))
@@ -130,7 +153,10 @@ jobs:
           import gdrive_upload_wyniki as g
           xlsx = Path("Wyniki/pl_materialy_kontakte.xlsx")
           if not xlsx.is_file():
-              raise SystemExit("Brak Wyniki/pl_materialy_kontakte.xlsx")
+              hits = list(Path(".").rglob("pl_materialy_kontakte.xlsx"))
+              if not hits:
+                  raise SystemExit("Brak pl_materialy_kontakte.xlsx")
+              xlsx = hits[0]
           creds, oauth = g._load_credentials()
           service, Media = g._drive_service(creds)
           folder = g._resolve_upload_folder(service, os.environ["GDRIVE_FOLDER_ID"], use_oauth=oauth)

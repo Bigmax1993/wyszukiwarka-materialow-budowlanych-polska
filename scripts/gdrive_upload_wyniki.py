@@ -407,6 +407,210 @@ def _download_drive_file(service, file_id: str, dest: Path) -> None:
             _, done = downloader.next_chunk()
 
 
+# Kanoniczne nazwy arkuszy w zbiorczym Excel PL
+_SHEET_INFO = "Info"
+_SHEET_KONTAKTE = "Kontakte"
+_SHEET_WOJEWODZTWA = "Wojewodztwa"
+_SHEET_NAME_ALIASES = {
+    "info": _SHEET_INFO,
+    "kontakte": _SHEET_KONTAKTE,
+    "kontakty": _SHEET_KONTAKTE,
+    "baza firm": _SHEET_KONTAKTE,
+    "wojewodztwa": _SHEET_WOJEWODZTWA,
+    "województwa": _SHEET_WOJEWODZTWA,
+    "bundeslaender": _SHEET_WOJEWODZTWA,
+    "bundesländer": _SHEET_WOJEWODZTWA,
+}
+_BOOL_EXPORT_COLS = frozenset(
+    {"WWW sprawdzone", "Mała firma", "Generalny wykonawca"}
+)
+
+
+def _canonical_sheet_name(name: str) -> str:
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+    return _SHEET_NAME_ALIASES.get(raw.lower(), raw)
+
+
+def _normalize_export_row(rec: dict, scraper) -> dict:
+    """Polskie nagłówki + tak/nie w kolumnach bool; zachowuje dodatkowe kolumny (CRM)."""
+    row = scraper.normalize_excel_record_headers(rec or {})
+    out: dict = {}
+    for key, val in row.items():
+        if str(key).startswith("_"):
+            continue
+        if key in _BOOL_EXPORT_COLS:
+            parsed = scraper.parse_excel_bool(val)
+            if parsed is True:
+                val = scraper.EXCEL_PL_YES
+            elif parsed is False:
+                val = scraper.EXCEL_PL_NO
+        out[key] = val
+    return out
+
+
+def _row_dedupe_key(sheet: str, row: dict) -> str:
+    if sheet == _SHEET_KONTAKTE:
+        url = str(row.get("URL") or row.get("Strona www") or "").strip().lower()
+        if url:
+            return f"url:{url}"
+        email = str(row.get("E-mail") or "").strip().lower()
+        if email:
+            return f"mail:{email}"
+        name = str(row.get("Nazwa firmy") or "").strip().lower()
+        return f"name:{name}|{row.get('Adres') or ''}"
+    if sheet == _SHEET_WOJEWODZTWA:
+        url = str(row.get("URL") or row.get("Strona www") or "").strip().lower()
+        if url:
+            return f"url:{url}"
+        return "|".join(
+            str(row.get(k) or "").strip().lower()
+            for k in ("Nazwa firmy", "Województwo", "Adres")
+        )
+    if sheet == _SHEET_INFO:
+        return str(row.get("Temat") or "").strip().lower()
+    return "|".join(f"{k}={row.get(k)}" for k in sorted(row.keys()))
+
+
+def _merge_sheet_row(existing: dict, incoming: dict) -> dict:
+    out = dict(existing)
+    for key, val in incoming.items():
+        if val is None or str(val).strip() == "":
+            continue
+        cur = out.get(key)
+        if cur is None or str(cur).strip() == "":
+            out[key] = val
+        elif isinstance(val, str) and isinstance(cur, str) and len(val) > len(cur):
+            out[key] = val
+    return out
+
+
+def _append_sheet_rows(
+    bucket: dict[str, dict],
+    sheet: str,
+    rows: list[dict],
+    scraper,
+) -> tuple[int, int]:
+    added = updated = 0
+    for raw in rows:
+        row = _normalize_export_row(raw, scraper)
+        if not any(str(v).strip() for v in row.values()):
+            continue
+        key = _row_dedupe_key(sheet, row)
+        if not key or key in ("url:", "mail:", "name:|"):
+            key = f"anon:{len(bucket)}:{hash(tuple(sorted(row.items())))}"
+        if key in bucket:
+            bucket[key] = _merge_sheet_row(bucket[key], row)
+            updated += 1
+        else:
+            bucket[key] = row
+            added += 1
+    return added, updated
+
+
+def read_xlsx_sheets_normalized(path: Path, scraper) -> dict[str, list[dict]]:
+    """Czyta wszystkie arkusze Excela i normalizuje nazwy arkuszy + kolumn na PL."""
+    import pandas as pd
+
+    out: dict[str, list[dict]] = {}
+    xl = pd.ExcelFile(path)
+    for name in xl.sheet_names:
+        canon = _canonical_sheet_name(name)
+        if not canon:
+            continue
+        df = pd.read_excel(path, sheet_name=name)
+        rows = [
+            _normalize_export_row(r, scraper)
+            for r in df.fillna("").to_dict(orient="records")
+        ]
+        out.setdefault(canon, []).extend(rows)
+    return out
+
+
+def order_sheet_columns(sheet: str, rows: list[dict], scraper) -> list[dict]:
+    """Unia kolumn: najpierw kanoniczne PL, potem pozostałe (CRM itd.)."""
+    if not rows:
+        return rows
+    preferred: list[str] = []
+    if sheet == _SHEET_KONTAKTE:
+        preferred = list(scraper.EXPORT_COLUMNS)
+    elif sheet == _SHEET_WOJEWODZTWA:
+        preferred = ["Nazwa firmy", "Województwo", "Adres", "Strona www", "URL"]
+    elif sheet == _SHEET_INFO:
+        preferred = ["Temat", "Wartość"]
+    cols: list[str] = []
+    seen: set[str] = set()
+    for col in preferred:
+        if any(col in r for r in rows):
+            cols.append(col)
+            seen.add(col)
+    extras = sorted(
+        {k for r in rows for k in r.keys() if k not in seen and not str(k).startswith("_")}
+    )
+    cols.extend(extras)
+    return [{c: r.get(c, "") for c in cols} for r in rows]
+
+
+def write_consolidated_xlsx(
+    path: Path,
+    sheets: dict[str, list[dict]],
+    *,
+    scraper,
+    logger: logging.Logger,
+) -> None:
+    """Zapis zbiorczego Excela: append po arkuszach, polskie kolumny, bez filtra eligible."""
+    libs = ROOT / "libs"
+    if str(libs) not in sys.path:
+        sys.path.insert(0, str(libs))
+    from scraper_email_replies import ReplySyncConfig, write_excel_with_reply_styles
+
+    # Info: kanoniczny opis + unikalne tematy ze źródeł
+    info_bucket: dict[str, dict] = {}
+    _append_sheet_rows(info_bucket, _SHEET_INFO, scraper.build_excel_info_sheet_rows(), scraper)
+    _append_sheet_rows(info_bucket, _SHEET_INFO, sheets.get(_SHEET_INFO) or [], scraper)
+
+    payload = {
+        _SHEET_INFO: order_sheet_columns(
+            _SHEET_INFO, list(info_bucket.values()), scraper
+        ),
+        _SHEET_KONTAKTE: order_sheet_columns(
+            _SHEET_KONTAKTE, sheets.get(_SHEET_KONTAKTE) or [], scraper
+        ),
+        _SHEET_WOJEWODZTWA: order_sheet_columns(
+            _SHEET_WOJEWODZTWA, sheets.get(_SHEET_WOJEWODZTWA) or [], scraper
+        ),
+    }
+    for name, rows in sheets.items():
+        if name in payload:
+            continue
+        payload[name] = order_sheet_columns(name, rows, scraper)
+
+    cfg = ReplySyncConfig(
+        cache_path=scraper.CACHE_FILE,
+        xlsx_path=path,
+        lang="pl",
+        campaign_id="pl_materialy",
+        main_sheet_names=(_SHEET_KONTAKTE, "Kontakty", "Baza firm"),
+    )
+    cache = {}
+    try:
+        if scraper.CACHE_FILE.is_file():
+            cache = scraper.load_cache(logger)
+    except Exception:
+        cache = {}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_excel_with_reply_styles(path, payload, cache, cfg, logger)
+    logger.info(
+        "Zbiorczy Excel: Kontakte=%s Wojewodztwa=%s Info=%s inne=%s → %s",
+        len(payload[_SHEET_KONTAKTE]),
+        len(payload[_SHEET_WOJEWODZTWA]),
+        len(payload[_SHEET_INFO]),
+        len(payload) - 3,
+        path.name,
+    )
+
+
 def _list_pl_kontakte_xlsx_on_drive(service, folder_id: str) -> list[dict]:
     """Wszystkie pliki Excel kontaktów PL w folderze Drive (w tym kopie z datą)."""
     q = (
@@ -496,8 +700,8 @@ def consolidate_all_kontakte_xlsx_from_drive(
     delete_old: bool = True,
 ) -> tuple[Path | None, list[dict]]:
     """
-    Pobiera WSZYSTKIE Excel kontaktów z folderu Drive, scala wiersze (append po URL),
-    zapisuje jeden lokalny plik z polskimi nagłówkami kolumn.
+    Pobiera WSZYSTKIE Excel kontaktów z folderu Drive, robi append na każdym arkuszu
+    (unia kolumn, polskie nagłówki), zapisuje jeden lokalny pl_materialy_kontakte.xlsx.
 
     Zwraca (ścieżka_kanoniczna | None, lista_plików_Drive_do_usunięcia_po_uploadzie).
     """
@@ -507,22 +711,37 @@ def consolidate_all_kontakte_xlsx_from_drive(
         return None, []
 
     import pl_materialy_scraper as scraper
+    from collections import OrderedDict
 
     canonical = local_xlsx.with_name(_PL_CANONICAL_KONTAKTE_XLSX)
     drive_files = _list_pl_kontakte_xlsx_on_drive(service, drive_parent_id)
-    local_rows: list[dict] = []
+
+    sheet_buckets: dict[str, OrderedDict[str, dict]] = {
+        _SHEET_INFO: OrderedDict(),
+        _SHEET_KONTAKTE: OrderedDict(),
+        _SHEET_WOJEWODZTWA: OrderedDict(),
+    }
+    loaded_names: list[str] = []
+
+    def _ingest_path(path: Path, label: str) -> None:
+        try:
+            wb = read_xlsx_sheets_normalized(path, scraper)
+        except Exception as e:
+            print(f"  Ostrzeżenie: {label}: {e}")
+            return
+        counts = []
+        for sheet, rows in wb.items():
+            bucket = sheet_buckets.setdefault(sheet, OrderedDict())
+            added, updated = _append_sheet_rows(bucket, sheet, rows, scraper)
+            counts.append(f"{sheet}+{added}/~{updated}")
+        loaded_names.append(f"{label}[{', '.join(counts)}]")
+
     if local_xlsx.parent.is_dir():
         for path in sorted(local_xlsx.parent.glob("*_kontakte*.xlsx")):
-            try:
-                rows, _ = scraper.load_existing_output(path, logger)
-                local_rows = scraper.merge_pipeline_rows(local_rows, rows)
-            except Exception as e:
-                print(f"  Ostrzeżenie: lokalny {path.name}: {e}")
+            _ingest_path(path, f"lokalny:{path.name}")
     elif canonical.is_file():
-        local_rows, _ = scraper.load_existing_output(canonical, logger)
+        _ingest_path(canonical, f"lokalny:{canonical.name}")
 
-    merged = list(local_rows)
-    loaded_names: list[str] = []
     with tempfile.TemporaryDirectory(prefix="gdrive-consolidate-") as tmp:
         tmp_path = Path(tmp)
         for f in drive_files:
@@ -530,25 +749,43 @@ def consolidate_all_kontakte_xlsx_from_drive(
             dest = tmp_path / name
             try:
                 _download_drive_file(service, f["id"], dest)
-                rows, _ = scraper.load_existing_output(dest, logger)
-                merged = scraper.merge_pipeline_rows(merged, rows)
-                loaded_names.append(f"{name}({len(rows)})")
+                _ingest_path(dest, name)
             except Exception as e:
                 print(f"  Ostrzeżenie: pominięto {name}: {e}")
 
-    if not drive_files and not local_rows:
+    if not drive_files and not any(sheet_buckets.values()):
         print("Drive consolidate: brak plików Excel do scalenia")
         return None, []
 
+    merged_sheets = {k: list(v.values()) for k, v in sheet_buckets.items()}
+    # Gdy brak arkusza Wojewodztwa — zbuduj z Kontakte (nazwa/woj/adres/www/url)
+    if not merged_sheets.get(_SHEET_WOJEWODZTWA) and merged_sheets.get(_SHEET_KONTAKTE):
+        woj: list[dict] = []
+        seen = set()
+        for r in merged_sheets[_SHEET_KONTAKTE]:
+            row = {
+                "Nazwa firmy": r.get("Nazwa firmy", ""),
+                "Województwo": r.get("Województwo", ""),
+                "Adres": r.get("Adres", ""),
+                "Strona www": r.get("Strona www", ""),
+                "URL": r.get("URL", ""),
+            }
+            key = _row_dedupe_key(_SHEET_WOJEWODZTWA, row)
+            if key in seen:
+                continue
+            seen.add(key)
+            woj.append(row)
+        merged_sheets[_SHEET_WOJEWODZTWA] = woj
+
     canonical.parent.mkdir(parents=True, exist_ok=True)
-    cache = scraper.load_cache(logger)
-    scraper.save_excel(merged, canonical, logger, cache=cache)
+    write_consolidated_xlsx(canonical, merged_sheets, scraper=scraper, logger=logger)
+    n_kontakte = len(merged_sheets.get(_SHEET_KONTAKTE) or [])
     print(
-        f"Drive consolidate: {len(drive_files)} plik(ów) z Drive + lokalne={len(local_rows)} "
-        f"→ {len(merged)} wierszy → {canonical.name}"
+        f"Drive consolidate: {len(drive_files)} plik(ów) z Drive "
+        f"→ {n_kontakte} wierszy Kontakte → {canonical.name}"
     )
     if loaded_names:
-        print("  Źródła: " + ", ".join(loaded_names))
+        print("  Źródła: " + "; ".join(loaded_names))
 
     stale: list[dict] = []
     if delete_old:

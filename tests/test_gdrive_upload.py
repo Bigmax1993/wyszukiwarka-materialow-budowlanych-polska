@@ -81,5 +81,44 @@ class GdriveVersionedXlsxTest(unittest.TestCase):
         )
 
 
+class GdriveSheetAppendTest(unittest.TestCase):
+    def test_canonical_sheet_and_polish_bool(self):
+        from scripts.gdrive_upload_wyniki import (
+            _append_sheet_rows,
+            _canonical_sheet_name,
+            _normalize_export_row,
+            order_sheet_columns,
+        )
+        import pl_materialy_scraper as scraper
+
+        self.assertEqual(_canonical_sheet_name("Kontakty"), "Kontakte")
+        self.assertEqual(_canonical_sheet_name("Województwa"), "Wojewodztwa")
+        row = _normalize_export_row(
+            {"Firmenname": "A", "WWW_geprueft": "ja", "Webseite": "https://a.pl"},
+            scraper,
+        )
+        self.assertEqual(row["Nazwa firmy"], "A")
+        self.assertEqual(row["WWW sprawdzone"], "tak")
+        self.assertEqual(row["Strona www"], "https://a.pl")
+
+        bucket: dict = {}
+        _append_sheet_rows(
+            bucket,
+            "Kontakte",
+            [
+                {"Nazwa firmy": "A", "URL": "https://a.pl", "Status maila": "sent"},
+                {"Firmenname": "A", "URL": "https://a.pl", "Telefon": "500"},
+            ],
+            scraper,
+        )
+        self.assertEqual(len(bucket), 1)
+        merged = next(iter(bucket.values()))
+        self.assertEqual(merged["Telefon"], "500")
+        self.assertEqual(merged["Status maila"], "sent")
+        ordered = order_sheet_columns("Kontakte", [merged], scraper)
+        self.assertEqual(ordered[0]["Nazwa firmy"], "A")
+        self.assertIn("Status maila", ordered[0])
+
+
 if __name__ == "__main__":
     unittest.main()

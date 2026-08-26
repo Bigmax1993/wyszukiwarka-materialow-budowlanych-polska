@@ -1804,9 +1804,14 @@ def load_existing_output(path: Path, logger: logging.Logger):
     try:
         import pandas as pd  # pyright: ignore[reportMissingImports]
 
-        try:
-            df = pd.read_excel(path, sheet_name="Kontakte")
-        except Exception:
+        df = None
+        for sheet in ("Kontakte", "Kontakty", "Baza firm"):
+            try:
+                df = pd.read_excel(path, sheet_name=sheet)
+                break
+            except Exception:
+                continue
+        if df is None:
             df = pd.read_excel(path)
         raw_records = df.fillna("").to_dict(orient="records")
         rows = []

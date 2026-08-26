@@ -37,6 +37,7 @@ env:
   GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
   GDRIVE_VERSION_XLSX: "0"
   GDRIVE_APPEND_XLSX: "1"
+  GDRIVE_CONSOLIDATE_ALL_XLSX: "1"
 
 jobs:
   sync-reminders:

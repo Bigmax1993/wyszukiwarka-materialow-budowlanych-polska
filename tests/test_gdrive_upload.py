@@ -12,8 +12,10 @@ if str(ROOT) not in sys.path:
 
 from scripts.gdrive_upload_wyniki import (  # noqa: E402
     _gdrive_append_xlsx_enabled,
+    _gdrive_consolidate_all_xlsx_enabled,
     _gdrive_version_xlsx_enabled,
     _skip_gdrive_upload,
+    is_pl_kontakte_xlsx_name,
     versioned_xlsx_upload_name,
 )
 
@@ -35,6 +37,14 @@ class GdriveUploadDefaultsTest(unittest.TestCase):
             if env is not None:
                 os.environ["GDRIVE_APPEND_XLSX"] = env
 
+    def test_consolidate_all_xlsx_default_on(self):
+        env = os.environ.pop("GDRIVE_CONSOLIDATE_ALL_XLSX", None)
+        try:
+            self.assertTrue(_gdrive_consolidate_all_xlsx_enabled())
+        finally:
+            if env is not None:
+                os.environ["GDRIVE_CONSOLIDATE_ALL_XLSX"] = env
+
 
 class GdriveSkipUploadTest(unittest.TestCase):
     def test_skip_json_and_log(self):
@@ -45,6 +55,16 @@ class GdriveSkipUploadTest(unittest.TestCase):
     def test_upload_xlsx_and_eml(self):
         self.assertFalse(_skip_gdrive_upload(Path("pl_materialy_kontakte.xlsx")))
         self.assertFalse(_skip_gdrive_upload(Path("wyslane/mail.eml")))
+
+
+class GdriveKontakteNameTest(unittest.TestCase):
+    def test_canonical_and_dated(self):
+        self.assertTrue(is_pl_kontakte_xlsx_name("pl_materialy_kontakte.xlsx"))
+        self.assertTrue(
+            is_pl_kontakte_xlsx_name("pl_materialy_kontakte_2026-06-08_1405.xlsx")
+        )
+        self.assertFalse(is_pl_kontakte_xlsx_name("notes.txt"))
+        self.assertFalse(is_pl_kontakte_xlsx_name("random.xlsx"))
 
 
 class GdriveVersionedXlsxTest(unittest.TestCase):

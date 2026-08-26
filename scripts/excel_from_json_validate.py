@@ -169,11 +169,11 @@ def excel_row_from_json(place_url: str, info: dict) -> dict:
         "E-mail": row["email_target"],
         "Strona www": row["www"],
         "URL": row["url"],
-        "Kategorie_materialow": row["retail_chains_found"],
-        "WWW_geprueft": "ja" if row["retail_verified"] else "nein",
-        "Kleinunternehmen": "ja" if row["is_small_firm"] else "nein",
-        "GU": "ja" if row["is_gu"] else "nein",
-        "GU_Marker": row["gu_marker"],
+        "Kategorie materiałów": row["retail_chains_found"],
+        "WWW sprawdzone": "tak" if row["retail_verified"] else "nie",
+        "Mała firma": "tak" if row["is_small_firm"] else "nie",
+        "Generalny wykonawca": "tak" if row["is_gu"] else "nie",
+        "Znacznik GU": row["gu_marker"],
         "Status": row["email_status"],
     }
 
@@ -207,7 +207,7 @@ def json_field_for_excel_col(info: dict, col: str, place_url: str) -> str:
         return _s(info.get("official_website")) or _s(place_url)
     if col == "URL":
         return _s(place_url) or _s(info.get("official_website"))
-    if col == "Kategorie_materialow":
+    if col == "Kategorie materiałów" or col == "Kategorie_materialow":
         return _s(info.get("retail_chains_found"))
     if col == "Status":
         return _s(info.get("email_status"))

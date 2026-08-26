@@ -30,8 +30,20 @@ Artefakt źródłowy sync: `pl-materialy-wyniki-thu` (niedzielny backfill). Szcz
 |---------|-----------|------|
 | `GDRIVE_VERSION_XLSX` | `0` | Bez kopii z datą — zawsze ten sam `pl_materialy_kontakte.xlsx` |
 | `GDRIVE_APPEND_XLSX` | `1` | Przed uploadem: pobierz Excel z Drive, dopisz nowe wiersze (po URL), nadpisz plik |
+| `GDRIVE_CONSOLIDATE_ALL_XLSX` | `1` | **Scala wszystkie** Excel z folderu Drive (`pl_materialy*kontakte*.xlsx` + kopie z datą) do jednego zbiorczego; nagłówki kolumn wyłącznie po polsku; usuwa stare kopie |
 
-Stare pliki `pl_materialy_kontakte_2026-*_*.xlsx` można usunąć ręcznie z folderu Drive.
+Jednorazowe scalenie (wszystkie obecne pliki na Drive → jeden):
+
+```powershell
+pip install -r requirements-drive.txt
+python scripts/consolidate_drive_xlsx_pl.py
+# tylko podgląd listy plików:
+python scripts/consolidate_drive_xlsx_pl.py --dry-run
+```
+
+Kolumny arkusza **Kontakte** (PL): Nazwa firmy, Adres, Województwo, Telefon, E-mail, Strona www, URL, Kategorie materiałów, WWW sprawdzone, Mała firma, Generalny wykonawca, Znacznik GU, Status (+ kolumny odpowiedzi mailowych po polsku).
+
+Stare pliki `pl_materialy_kontakte_2026-*_*.xlsx` są usuwane automatycznie przy consolidate (albo ręcznie z folderu Drive).
 
 ### Upload z GitHub Actions (OAuth)
 

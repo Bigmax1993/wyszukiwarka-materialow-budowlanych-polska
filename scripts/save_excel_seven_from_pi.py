@@ -89,10 +89,12 @@ def _pipeline_row_to_export(row: dict) -> dict:
     table = scraper.row_to_excel_kontakte_columns(row, email)
     return {
         **table,
-        "WWW_geprueft": "ja" if row.get("retail_verified") else "nein",
-        "Kleinunternehmen": "ja" if row.get("is_small_firm") else "nein",
-        "GU": "ja" if row.get("is_gu") or scraper._row_has_gu_signal(row) else "nein",
-        "GU_Marker": (row.get("gu_marker") or "").strip(),
+        "WWW sprawdzone": scraper.excel_bool_pl(bool(row.get("retail_verified"))),
+        "Mała firma": scraper.excel_bool_pl(bool(row.get("is_small_firm"))),
+        "Generalny wykonawca": scraper.excel_bool_pl(
+            bool(row.get("is_gu") or scraper._row_has_gu_signal(row))
+        ),
+        "Znacznik GU": (row.get("gu_marker") or "").strip(),
         "Status": scraper._excel_status_label(row),
     }
 

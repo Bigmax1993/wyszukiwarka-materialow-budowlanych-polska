@@ -12,6 +12,8 @@ Zmienne:
   GDRIVE_IMPERSONATE_EMAIL — opcjonalnie e-mail użytkownika Workspace (domain-wide delegation)
   GDRIVE_VERSION_XLSX — 0 (domyślnie): jeden plik .xlsx, nadpisywanie po merge (append wierszy)
   GDRIVE_APPEND_XLSX — 1 (domyślnie): przed uploadem scala lokalny Excel z plikiem na Drive
+  GDRIVE_CONSOLIDATE_ALL_XLSX — 1 (domyślnie dla PL): scala WSZYSTKIE Excel z folderu Drive
+    do jednego pl_materialy_kontakte.xlsx (append wierszy / polskie kolumny), usuwa stare kopie
 
 Na Google Drive trafia tylko Excel (i opcjonalnie wyslane/*.eml).
 Pliki .json i .log pozostają wyłącznie w artefaktach GitHub Actions.
@@ -19,6 +21,7 @@ Pliki .json i .log pozostają wyłącznie w artefaktach GitHub Actions.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import mimetypes
 import os
@@ -26,6 +29,8 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+
+_PL_CANONICAL_KONTAKTE_XLSX = "pl_materialy_kontakte.xlsx"
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -69,6 +74,25 @@ def _gdrive_version_xlsx_enabled() -> bool:
 def _gdrive_append_xlsx_enabled() -> bool:
     raw = (os.environ.get("GDRIVE_APPEND_XLSX") or "1").strip().lower()
     return raw not in ("0", "false", "no", "off")
+
+
+def _gdrive_consolidate_all_xlsx_enabled() -> bool:
+    raw = (os.environ.get("GDRIVE_CONSOLIDATE_ALL_XLSX") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def is_pl_kontakte_xlsx_name(name: str) -> bool:
+    """True dla pl_materialy_kontakte.xlsx i starych kopii z datą / aliasów."""
+    low = (name or "").strip().lower()
+    if not low.endswith(".xlsx"):
+        return False
+    if "pl_materialy" in low and "kontakte" in low:
+        return True
+    if low == _PL_CANONICAL_KONTAKTE_XLSX:
+        return True
+    if "_kontakte_" in low or low.endswith("_kontakte.xlsx"):
+        return True
+    return False
 
 
 def _upload_stamp() -> str:
@@ -383,6 +407,42 @@ def _download_drive_file(service, file_id: str, dest: Path) -> None:
             _, done = downloader.next_chunk()
 
 
+def _list_pl_kontakte_xlsx_on_drive(service, folder_id: str) -> list[dict]:
+    """Wszystkie pliki Excel kontaktów PL w folderze Drive (w tym kopie z datą)."""
+    q = (
+        f"'{folder_id}' in parents and trashed = false and "
+        f"mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
+    )
+    files: list[dict] = []
+    page_token = None
+    while True:
+        res = (
+            service.files()
+            .list(
+                q=q,
+                fields="nextPageToken, files(id,name,modifiedTime)",
+                pageSize=100,
+                pageToken=page_token,
+                corpora="allDrives",
+                **_LIST_OPTS,
+            )
+            .execute()
+        )
+        for f in res.get("files") or []:
+            if is_pl_kontakte_xlsx_name(f.get("name") or ""):
+                files.append(f)
+        page_token = res.get("nextPageToken")
+        if not page_token:
+            break
+    files.sort(key=lambda f: (f.get("modifiedTime") or "", f.get("name") or ""))
+    return files
+
+
+def _delete_drive_file(service, file_id: str, name: str = "") -> None:
+    service.files().delete(fileId=file_id, **_DRIVE_API_OPTS).execute()
+    print(f"  Usunięto z Drive: {name or file_id}")
+
+
 def append_kontakte_xlsx_from_drive(
     service,
     local_xlsx: Path,
@@ -426,6 +486,100 @@ def append_kontakte_xlsx_from_drive(
         return added
 
 
+def consolidate_all_kontakte_xlsx_from_drive(
+    service,
+    local_xlsx: Path,
+    drive_parent_id: str,
+    *,
+    campaign: str,
+    logger: logging.Logger,
+    delete_old: bool = True,
+) -> tuple[Path | None, list[dict]]:
+    """
+    Pobiera WSZYSTKIE Excel kontaktów z folderu Drive, scala wiersze (append po URL),
+    zapisuje jeden lokalny plik z polskimi nagłówkami kolumn.
+
+    Zwraca (ścieżka_kanoniczna | None, lista_plików_Drive_do_usunięcia_po_uploadzie).
+    """
+    if campaign != "pl":
+        return None, []
+    if not _gdrive_consolidate_all_xlsx_enabled():
+        return None, []
+
+    import pl_materialy_scraper as scraper
+
+    canonical = local_xlsx.with_name(_PL_CANONICAL_KONTAKTE_XLSX)
+    drive_files = _list_pl_kontakte_xlsx_on_drive(service, drive_parent_id)
+    local_rows: list[dict] = []
+    if local_xlsx.parent.is_dir():
+        for path in sorted(local_xlsx.parent.glob("*_kontakte*.xlsx")):
+            try:
+                rows, _ = scraper.load_existing_output(path, logger)
+                local_rows = scraper.merge_pipeline_rows(local_rows, rows)
+            except Exception as e:
+                print(f"  Ostrzeżenie: lokalny {path.name}: {e}")
+    elif canonical.is_file():
+        local_rows, _ = scraper.load_existing_output(canonical, logger)
+
+    merged = list(local_rows)
+    loaded_names: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="gdrive-consolidate-") as tmp:
+        tmp_path = Path(tmp)
+        for f in drive_files:
+            name = f.get("name") or "remote.xlsx"
+            dest = tmp_path / name
+            try:
+                _download_drive_file(service, f["id"], dest)
+                rows, _ = scraper.load_existing_output(dest, logger)
+                merged = scraper.merge_pipeline_rows(merged, rows)
+                loaded_names.append(f"{name}({len(rows)})")
+            except Exception as e:
+                print(f"  Ostrzeżenie: pominięto {name}: {e}")
+
+    if not drive_files and not local_rows:
+        print("Drive consolidate: brak plików Excel do scalenia")
+        return None, []
+
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    cache = scraper.load_cache(logger)
+    scraper.save_excel(merged, canonical, logger, cache=cache)
+    print(
+        f"Drive consolidate: {len(drive_files)} plik(ów) z Drive + lokalne={len(local_rows)} "
+        f"→ {len(merged)} wierszy → {canonical.name}"
+    )
+    if loaded_names:
+        print("  Źródła: " + ", ".join(loaded_names))
+
+    stale: list[dict] = []
+    if delete_old:
+        stale = [
+            f
+            for f in drive_files
+            if (f.get("name") or "") != _PL_CANONICAL_KONTAKTE_XLSX
+        ]
+    return canonical, stale
+
+
+def delete_stale_kontakte_xlsx_on_drive(service, drive_files: list[dict]) -> int:
+    """Usuwa z Drive kopie Excel inne niż kanoniczna nazwa zbiorcza."""
+    stale = [
+        f
+        for f in drive_files
+        if (f.get("name") or "") != _PL_CANONICAL_KONTAKTE_XLSX
+    ]
+    if not stale:
+        return 0
+    print(f"Usuwam {len(stale)} starych kopii Excel z Drive (zostaje jeden zbiorczy):")
+    n = 0
+    for f in stale:
+        try:
+            _delete_drive_file(service, f["id"], f.get("name") or "")
+            n += 1
+        except Exception as e:
+            print(f"  Nie usunięto {f.get('name')}: {e}")
+    return n
+
+
 def merge_wyniki_xlsx_from_drive(
     service,
     wyniki: Path,
@@ -433,10 +587,31 @@ def merge_wyniki_xlsx_from_drive(
     *,
     campaign: str,
     logger: logging.Logger,
-) -> None:
-    """Scala wszystkie pliki *_kontakte.xlsx z folderu Wyniki/ z wersją na Drive."""
+    consolidate_all: bool | None = None,
+) -> list[dict]:
+    """
+    Scala Excel z Drive z lokalnym Wyniki/.
+    Dla PL domyślnie: wszystkie pliki Excel z folderu → jeden pl_materialy_kontakte.xlsx.
+    Zwraca listę plików Drive do usunięcia po udanym uploadzie zbiorczego.
+    """
     if not wyniki.is_dir():
-        return
+        return []
+    do_all = (
+        _gdrive_consolidate_all_xlsx_enabled()
+        if consolidate_all is None
+        else consolidate_all
+    )
+    if campaign == "pl" and do_all:
+        _path, stale = consolidate_all_kontakte_xlsx_from_drive(
+            service,
+            wyniki / _PL_CANONICAL_KONTAKTE_XLSX,
+            drive_parent_id,
+            campaign=campaign,
+            logger=logger,
+            delete_old=True,
+        )
+        return stale
+
     for path in sorted(wyniki.glob("*_kontakte.xlsx")):
         append_kontakte_xlsx_from_drive(
             service,
@@ -445,9 +620,17 @@ def merge_wyniki_xlsx_from_drive(
             campaign=campaign,
             logger=logger,
         )
+    return []
 
 
-def upload_files_flat(service, MediaFileUpload, local_dir: Path, drive_parent_id: str) -> int:
+def upload_files_flat(
+    service,
+    MediaFileUpload,
+    local_dir: Path,
+    drive_parent_id: str,
+    *,
+    campaign: str = "gu",
+) -> int:
     if not local_dir.is_dir():
         return 0
     count = 0
@@ -456,6 +639,15 @@ def upload_files_flat(service, MediaFileUpload, local_dir: Path, drive_parent_id
             continue
         if _skip_gdrive_upload(p):
             print(f"  SKIP {p.name} (tylko GitHub artefakt)")
+            continue
+        # PL: na Drive tylko jeden zbiorczy Excel (bez kopii z datą).
+        if (
+            campaign == "pl"
+            and p.suffix.lower() == ".xlsx"
+            and is_pl_kontakte_xlsx_name(p.name)
+            and p.name != _PL_CANONICAL_KONTAKTE_XLSX
+        ):
+            print(f"  SKIP {p.name} (używamy tylko {_PL_CANONICAL_KONTAKTE_XLSX})")
             continue
         _upload_file(service, MediaFileUpload, p, drive_parent_id)
         print(f"  OK {p.name}")
@@ -511,8 +703,23 @@ def main() -> int:
         "--folder-id",
         default=None,
     )
+    parser.add_argument(
+        "--consolidate-all-xlsx",
+        action="store_true",
+        help="Wymuś scalenie wszystkich Excel z Drive do jednego pliku (PL)",
+    )
+    parser.add_argument(
+        "--no-consolidate-all-xlsx",
+        action="store_true",
+        help="Wyłącz scalanie wszystkich Excel (tylko append do kanonicznej nazwy)",
+    )
     args = parser.parse_args()
     folder_id = (args.folder_id or _default_folder_id(args.campaign)).strip()
+
+    if args.consolidate_all_xlsx:
+        os.environ["GDRIVE_CONSOLIDATE_ALL_XLSX"] = "1"
+    if args.no_consolidate_all_xlsx:
+        os.environ["GDRIVE_CONSOLIDATE_ALL_XLSX"] = "0"
 
     creds, use_oauth = _load_credentials()
     service, MediaFileUpload = _drive_service(creds)
@@ -521,9 +728,10 @@ def main() -> int:
     logger = logging.getLogger("gdrive_upload")
 
     total = 0
+    stale_to_delete: list[dict] = []
     w = wyniki_dir(data_root)
     if w.is_dir():
-        merge_wyniki_xlsx_from_drive(
+        stale_to_delete = merge_wyniki_xlsx_from_drive(
             service,
             w,
             upload_folder_id,
@@ -531,7 +739,15 @@ def main() -> int:
             logger=logger,
         )
         print(f"Upload plikow z {w} -> Drive {upload_folder_id}")
-        total += upload_files_flat(service, MediaFileUpload, w, upload_folder_id)
+        total += upload_files_flat(
+            service,
+            MediaFileUpload,
+            w,
+            upload_folder_id,
+            campaign=args.campaign,
+        )
+        if stale_to_delete and total > 0:
+            delete_stale_kontakte_xlsx_on_drive(service, stale_to_delete)
     s = wyslane_dir(data_root)
     if s.is_dir():
         print(f"Upload {s} -> Drive/wyslane/")

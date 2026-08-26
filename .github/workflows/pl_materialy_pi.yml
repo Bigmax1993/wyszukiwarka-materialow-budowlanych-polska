@@ -137,6 +137,12 @@ jobs:
           fi
           python pl_materialy_scraper.py $ARGS
 
+      - name: Verify Excel vs JSON and fill missing fields
+        if: always()
+        continue-on-error: true
+        run: |
+          python scripts/verify_excel_from_json.py --campaign pl --wyniki Wyniki
+
       - name: Upload Wyniki artifact (discovery)
         if: always()
         uses: actions/upload-artifact@v4

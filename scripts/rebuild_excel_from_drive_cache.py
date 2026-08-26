@@ -202,6 +202,13 @@ def main() -> int:
         require_eligible=require_eligible,
     )
     print(f"Zapisano lokalnie: {local_xlsx} ({local_xlsx.stat().st_size} B)")
+    try:
+        from scripts.verify_excel_from_json import run_verify_after_excel_save
+
+        print("Weryfikacja Excel vs JSON (uzupełnienie braków)…")
+        run_verify_after_excel_save(local_xlsx.parent, "pl", logger)
+    except Exception as e:
+        logger.warning("verify_excel_from_json pominięte: %s", e)
 
     os.environ["GDRIVE_VERSION_XLSX"] = "0"
     os.environ["GDRIVE_APPEND_XLSX"] = "0"

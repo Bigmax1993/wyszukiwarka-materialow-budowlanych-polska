@@ -95,6 +95,7 @@ jobs:
             ARGS="--eligible-only"
           fi
           python scripts/rebuild_excel_full_from_cache.py $ARGS
+          python scripts/verify_excel_from_json.py --campaign pl --wyniki Wyniki || true
           python - <<'PY'
           import pandas as pd
           from pathlib import Path

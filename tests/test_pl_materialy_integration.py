@@ -147,3 +147,18 @@ def test_sunday_backfill_verifies_excel_from_json_and_uploads_drive():
     assert "gdrive_upload_wyniki.py" in text
     assert "GDRIVE_FOLDER_ID_PL" in text
     assert "--campaign pl" in text
+
+
+@pytest.mark.parametrize(
+    "workflow_file",
+    [
+        "pl_materialy_pi.yml",
+        "pl_materialy_mon.yml",
+        "pl_materialy_rebuild_excel.yml",
+        "pl_full_excel_from_artifact.yml",
+        "pl_materialy_thu.yml",
+    ],
+)
+def test_excel_write_workflows_verify_from_json(workflow_file: str):
+    text = (ROOT / ".github" / "workflows" / workflow_file).read_text(encoding="utf-8")
+    assert "verify_excel_from_json.py" in text

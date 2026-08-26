@@ -1712,6 +1712,24 @@ def persist_progress(all_rows, cache, logger: logging.Logger, reason: str = "") 
         console_step("Zwischenstand speichern")
     save_excel(all_rows, OUTPUT_FILE, logger, cache=cache)
     save_cache(cache, logger)
+    # Po finalnym zapisie: uzupełnij braki z JSON i nadpisz Excel.
+    _verify_reasons = {
+        "rebuild_from_cache",
+        "Ende Lauf",
+        "verify_pending_contacts",
+    }
+    flag = (os.environ.get("VERIFY_EXCEL_AFTER_SAVE") or "1").strip().lower()
+    if flag in ("0", "false", "no", "off"):
+        return
+    if reason not in _verify_reasons and flag not in ("force", "always"):
+        return
+    try:
+        from scripts.verify_excel_from_json import run_verify_after_excel_save
+
+        console_step("Weryfikacja Excel vs JSON (uzupełnienie braków)")
+        run_verify_after_excel_save(OUTPUT_DIR, "pl", logger)
+    except Exception as e:
+        logger.warning("verify_excel_from_json pominięte: %s", e)
 
 
 EXCEL_IMPORT_COLUMNS = {
@@ -6829,6 +6847,12 @@ if __name__ == "__main__":
             existing_rows, _ = load_existing_output(OUTPUT_FILE, logger)
             all_rows = merge_pipeline_rows(existing_rows, cache_rows)
             save_excel(all_rows, OUTPUT_FILE, logger, cache=cache)
+            try:
+                from scripts.verify_excel_from_json import run_verify_after_excel_save
+
+                run_verify_after_excel_save(OUTPUT_DIR, "pl", logger)
+            except Exception as e:
+                logger.warning("verify_excel_from_json pominięte: %s", e)
             print(
                 f"[BACKFILL] cache zapisany → {CACHE_FILE}\n"
                 f"  sprawdzono={stats['checked']}, uzupelniono={stats['filled']}, "

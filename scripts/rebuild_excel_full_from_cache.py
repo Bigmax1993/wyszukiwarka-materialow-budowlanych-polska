@@ -230,6 +230,13 @@ def main() -> int:
         require_eligible=args.eligible_only,
     )
     logger.info("WROTE %s bytes=%s", scraper.OUTPUT_FILE, scraper.OUTPUT_FILE.stat().st_size)
+    try:
+        from scripts.verify_excel_from_json import run_verify_after_excel_save
+
+        logger.info("Weryfikacja Excel vs JSON (uzupełnienie braków)…")
+        run_verify_after_excel_save(scraper.OUTPUT_DIR, "pl", logger)
+    except Exception as e:
+        logger.warning("verify_excel_from_json pominięte: %s", e)
     return 0
 
 

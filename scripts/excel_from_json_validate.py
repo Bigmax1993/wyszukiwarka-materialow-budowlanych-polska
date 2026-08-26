@@ -129,9 +129,20 @@ def pipeline_row_from_json(place_url: str, info: dict) -> dict:
         or _s(info.get("company_name"))
         or _s(info.get("company_name_raw"))
     )
-    email = first_email_from_contact(info)
-    phone = first_phone_from_contact(info)
-    website = _s(info.get("official_website")) or _s(place_url)
+    email = first_email_from_contact(info) or _s(info.get("email"))
+    phone = first_phone_from_contact(info) or _s(info.get("phone") or info.get("telefon"))
+    if "," in phone:
+        phone = phone.split(",", 1)[0].strip()
+    website = (
+        _s(info.get("official_website"))
+        or _s(info.get("website"))
+        or _s(place_url)
+    )
+    address = (
+        _s(info.get("full_address"))
+        or _s(info.get("address"))
+        or _s(info.get("adres"))
+    )
     return {
         "url": _s(place_url) or website,
         "www": website,
@@ -143,13 +154,14 @@ def pipeline_row_from_json(place_url: str, info: dict) -> dict:
         "emails_found": _s(info.get("emails_found")),
         "telefon": phone,
         "phones_found": _s(info.get("phones_found")) or phone,
-        "full_address": _s(info.get("full_address")),
-        "adres": _s(info.get("full_address")),
+        "full_address": address,
+        "adres": address,
         "bundesland": _s(info.get("bundesland")) or _s(info.get("discovery_bundesland")),
-        "retail_verified": bool(info.get("retail_verified")),
+        "retail_verified": bool(info.get("retail_verified") or info.get("verified")),
         "verification_reason": _s(info.get("verification_reason")),
         "page_snippet": _s(info.get("page_snippet")),
-        "retail_chains_found": _s(info.get("retail_chains_found")),
+        "retail_chains_found": _s(info.get("retail_chains_found"))
+        or _s(info.get("handelsketten")),
         "is_gu": bool(info.get("is_gu")),
         "is_small_firm": info.get("is_small_firm", True),
         "gu_marker": _s(info.get("gu_marker")),
@@ -196,19 +208,23 @@ def json_field_for_excel_col(info: dict, col: str, place_url: str) -> str:
             or _s(info.get("company_name_raw"))
         )
     if col == "Adres":
-        return _s(info.get("full_address"))
+        return (
+            _s(info.get("full_address"))
+            or _s(info.get("address"))
+            or _s(info.get("adres"))
+        )
     if col == "Województwo":
         return _s(info.get("bundesland")) or _s(info.get("discovery_bundesland"))
     if col == "Telefon":
-        return first_phone_from_contact(info)
+        return first_phone_from_contact(info) or _s(info.get("phone") or info.get("telefon"))
     if col == "E-mail":
-        return first_email_from_contact(info)
+        return first_email_from_contact(info) or _s(info.get("email"))
     if col == "Strona www":
-        return _s(info.get("official_website")) or _s(place_url)
+        return _s(info.get("official_website")) or _s(info.get("website")) or _s(place_url)
     if col == "URL":
-        return _s(place_url) or _s(info.get("official_website"))
+        return _s(place_url) or _s(info.get("official_website")) or _s(info.get("url"))
     if col == "Kategorie materiałów" or col == "Kategorie_materialow":
-        return _s(info.get("retail_chains_found"))
+        return _s(info.get("retail_chains_found")) or _s(info.get("handelsketten"))
     if col == "Status":
         return _s(info.get("email_status"))
     return ""

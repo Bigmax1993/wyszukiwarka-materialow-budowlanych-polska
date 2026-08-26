@@ -12,13 +12,14 @@ Folder w chmurze: [PL Materialy Budowlane](https://drive.google.com/drive/folder
 |---------------|--------|
 | `pl_materialy_kontakte.xlsx` | **Google Drive** (jeden plik — append wierszy, bez kopii z datą) |
 | `wyslane/*.eml` | **Google Drive** (kopie wysłanych maili) |
-| `pl_materialy_cache.json` | **GitHub Actions** (artefakt `pl-materialy-wyniki-*`; duży — zawiera `website_crawl`) |
+| `pl_materialy_cache.json` | **GitHub Actions** (artefakt `pl-materialy-wyniki-*`) + zwykle też na Drive |
 | `pl_materialy_scraper.log` | **GitHub Actions** (artefakt) |
 | `pl_materialy_wojewodztwo_rotation.json` | **GitHub Actions** (artefakt) |
 
 | Sposób | Kiedy |
 |--------|--------|
-| **GitHub Actions** | Niedzielny backfill: upload → verify JSON → refill braków → re-upload. Poniedziałek 11:00 `Sync wyniki Google Drive PL`. Ręcznie: **PL full Excel** / **PL refill missing**. |
+| **GitHub Actions** | Niedzielny backfill (`PL niedziela backfill`): upload → weryfikacja Excel vs JSON → ponowny upload. Dodatkowo poniedziałek 11:00 `Sync wyniki Google Drive PL`. |
+| **Ręcznie (GHA)** | `PL rebuild Excel`, `PL refill missing Excel contacts`, `PL consolidate Excel Drive`, `PL audit Excel completeness` |
 | **Lokalnie** | `python scripts/gdrive_upload_wyniki.py --campaign pl` |
 | **PC + Drive for desktop** | `KANBUD_DATA_DIR` → folder `PL Materialy Budowlane Wyniki` |
 
@@ -32,46 +33,35 @@ Artefakt źródłowy sync: `pl-materialy-wyniki-thu` (niedzielny backfill). Szcz
 | `GDRIVE_APPEND_XLSX` | `1` | Przed uploadem: pobierz Excel z Drive, dopisz nowe wiersze (po URL), nadpisz plik |
 | `GDRIVE_CONSOLIDATE_ALL_XLSX` | `1` | **Scala wszystkie** Excel z folderu Drive do jednego zbiorczego; nagłówki wyłącznie po polsku; usuwa stare kopie |
 
-Jednorazowe scalenie (wszystkie obecne pliki na Drive → jeden):
+Jednorazowe scalenie:
 
 ```powershell
 pip install -r requirements-drive.txt
 python scripts/consolidate_drive_xlsx_pl.py
-# tylko podgląd listy plików:
 python scripts/consolidate_drive_xlsx_pl.py --dry-run
 ```
 
-**Kolumny arkusza Kontakte (tylko PL — bez odpowiedzi/cen):**
+### Kolumny arkusza Kontakte (PL)
 
 Nazwa firmy, Adres, Województwo, Telefon, E-mail, Strona www, URL, Kategorie materiałów, WWW sprawdzone, Mała firma, Generalny wykonawca, Znacznik GU, Status.
 
-Usunięte na stałe z eksportu PL: Status maila, Wysłano, Odpowiedź, Cena, Waluta, Opis, Zadzwoń?, Cena rel*.
+Wartości bool: **`tak` / `nie`**.
 
-### Skąd biorą się wiersze / pola
+**Bez kolumn CRM** (odpowiedź, cena, status maila, …) — przy consolidate/upload są usuwane (`is_reply_export_column`).
 
-| Źródło w `*_cache.json` | Co wnosi do Excela |
-|-------------------------|--------------------|
-| `contacts` | Pełne rekordy pipeline (często cienkie) |
-| `website_crawl` | E-mail, telefon, nazwa ze stron (główne źródło objętości) |
-| `claude_row_enrichment` | Adres, telefon, nazwa (uzupełnienie) |
-| `claude_page_verify` | Flagi verified / kategorie / GU |
+Sztywny cleanup wiersza (Claude): [KILLER_PROMPT_EXCEL_FILL_PL.md](KILLER_PROMPT_EXCEL_FILL_PL.md).
 
-Po zapisie: `verify_excel_from_json.py` uzupełnia puste kolumny z JSON i **nadpisuje** plik.  
-Braki nadal puste → `refill_missing_excel_contacts.py` (Serper + crawl + Claude + `RELAXED_CONTACT_REGEX`).
+Stare pliki `pl_materialy_kontakte_2026-*_*.xlsx` są usuwane automatycznie przy consolidate.
 
-Pełny rebuild z artefaktu GHA:
+### Co Excel zawiera, a czego nie
 
-```powershell
-gh workflow run "PL full Excel from GitHub artifact" -R Bigmax1993/wyszukiwarka-materialow-budowlanych-polska
-```
+| Źródło | W Excelu? |
+|--------|-----------|
+| Kontakty z e-mailem (pipeline export) | tak |
+| Enrichment / verified firmy | często (po rebuild/full excel) |
+| Pełny `website_crawl` (setki URL bez kontaktu) | **nie** — to nie jest dump crawla |
 
-Uzupełnienie braków (API):
-
-```powershell
-gh workflow run "PL refill missing Excel contacts" -R Bigmax1993/wyszukiwarka-materialow-budowlanych-polska -f limit=30 -f upload_drive=true
-```
-
-Stare pliki `pl_materialy_kontakte_2026-*_*.xlsx` są usuwane przy consolidate (albo ręcznie z folderu Drive).
+Audyt kompletności (Drive vs artefakt): workflow **PL audit Excel completeness**.
 
 ### Upload z GitHub Actions (OAuth)
 
@@ -89,6 +79,6 @@ Skrypt ustawi secrets `GDRIVE_OAUTH_*`. Kolejne runy CI uploadują na folder PL.
 | **Kiedy** | **Poniedziałek 11:00** (Europe/Warsaw) |
 | **Cron** | `0 11 * * 1` |
 | **Źródło danych** | Artefakt **`pl-materialy-wyniki-thu`** |
-| **Kolejność fallback** | `thu` → `mon` → `tue` → `fri` |
+| **Kolejność fallback** | `thu` → `mon` → `tue` → `fri` → `pi` |
 
 Lokalny skrypt `scripts/upload_wyniki_to_drive.ps1` używa tej samej kolejności artefaktów co workflow CI.

@@ -1,6 +1,9 @@
 # Killer prompt — uzupełnianie wiersza Excel (PL materiały)
 
-Używany przez `pl_claude_prompts.build_row_cleanup_prompt` przed zapisem `pl_materialy_kontakte.xlsx`.
+Używany przez `pl_claude_prompts.build_row_cleanup_prompt` przed zapisem `pl_materialy_kontakte.xlsx`
+(gdy `enable_claude_row_cleanup: true` w `run_config/pl_materialy.json`).
+
+Powiązane workflowy: **PL rebuild Excel**, **PL refill missing Excel contacts**, **PL full Excel from GitHub artifact**.
 
 ## Kolumny docelowe (sztywno)
 
@@ -18,7 +21,7 @@ Używany przez `pl_claude_prompts.build_row_cleanup_prompt` przed zapisem `pl_ma
 | Znacznik GU | krótki marker lub puste |
 | Status | status pipeline (sent / …) — nie kategorie |
 
-## Prompt (skrót zasad)
+## Prompt — KILLER-REGELN (skrót)
 
 1. Tylko hurtownie / składy / dystrybutorzy / producenci materiałów budowlanych PL.
 2. Portale (Facebook, Lento, OLX, Allegro…) → puste pola nazwa/www/url.
@@ -26,5 +29,9 @@ Używany przez `pl_claude_prompts.build_row_cleanup_prompt` przed zapisem `pl_ma
 4. Województwo nie może być w Adres.
 5. „tak”/„nie”/statusy nie mogą być w Kategorie.
 6. Niepewność → pusty string, nigdy halucynacja.
+7. Odpowiedź modelu: **wyłącznie JSON** ze schematem  
+   `company_name_clean`, `address`, `phone`, `website`, `bundesland`, `handelsketten`, `url`.
 
-Pełny tekst: funkcja `build_row_cleanup_prompt` w `pl_claude_prompts.py`.
+Test: `tests/test_pl_killer_row_cleanup_prompt.py`.
+
+Pełny tekst promptu: funkcja `build_row_cleanup_prompt` w `pl_claude_prompts.py`.

@@ -213,29 +213,58 @@ def build_row_cleanup_prompt(
     url: str = "",
 ) -> str:
     return f"""ROLA
-Przygotowujesz wiersz Excel dla bazy B2B hurtowni / dostawców materiałów budowlanych w Polsce.
-Odpowiedz WYŁĄCZNIE JSON.
+Jesteś QA danych przed eksportem Excel „Kontakte” (PL materiały budowlane B2B).
+Twój JSON ląduje 1:1 w kolumnach arkusza. Błędy = złe maile B2B — zero tolerancji.
+Odpowiedz WYŁĄCZNIE jednym obiektem JSON — bez Markdown, bez komentarzy.
 
-SCHEMAT
+GRUPA DOCELOWA (tylko te firmy mogą mieć nazwę)
+Hurtownie / składy / dystrybutorzy / producenci materiałów budowlanych w Polsce
+(cement, kruszywa, styropian, wełna, chemia budowlana, drewno konstrukcyjne, armatura, stal zbrojeniowa, dachówka, płyty, sucha zabudowa).
+NIE: portale ogłoszeniowe, Facebook/Instagram, Allegro, OLX, Lento, Panorama Firm, Wikipedia, banki, urzędy, szkoły, blogi, drogerie, meble, interior design, czysty wykonawca bez handlu materiałami.
+
+SCHEMA (exakt — wszystkie klucze; puste stringi dozwolone)
 {{"company_name_clean":"","address":"","phone":"","website":"","bundesland":"","handelsketten":"","url":""}}
 
-ZASADY
-• company_name_clean — oficjalna nazwa firmy + forma prawna (Sp. z o.o., sp.j., S.A.) albo krótka nazwa handlowa z Impressum; NIE tytuł SEO strony, NIE nagłówek sekcji (np. „Biuro obsługi klienta”, „Artykuły sezonowe”); jeśli brak pewności — ""
-• address — WYŁĄCZNIE fizyczny adres siedziby / składu w Polsce (ulica + kod XX-XXX + miasto); NIE opis oferty, NIE tekst marketingowy; jeśli brak — ""
-• phone — jeden numer PL (+48 lub 9 cyfr krajowych) albo ""
-• website — https://domena (korzeń) albo ""
-• bundesland — jedno z województw: [{states}] albo ""
-• handelsketten — kategorie materiałów (cement, piasek, …) przez przecinek albo ""
-• url — jak website
+═══ company_name_clean — KILLER-REGELN (najwyższy priorytet) ═══
+ERLAUBT: oficjalna nazwa firmy + forma prawna w JEDNEJ linii
+(Sp. z o.o., sp.j., S.A., sp.k., sp.p., P.H.U., P.P.H., firma jednoosobowa z nazwiskiem).
+OK: „Lubar Sp. z o.o.”, „CHEMIA BUDOWLANA Kowalski Sp. j.”, „MB Kruszywa Sp. z o.o.”
+NICHT OK / SOFORT company_name_clean="":
+• sam URL / domena / ścieżka (https://…, www., .pl/)
+• E-mail, emoji, slogan marketingowy, „Biuro obsługi”, „Kontakt”, „Sklep online”
+• tytuł SEO / H1 katalogu („Styropian tanio Warszawa”, „Cement i piasek”)
+• portal: facebook.com, lento.pl, olx.pl, allegro.pl, wikipedia, yellow pages
+• nazwa miasta / województwa jako „firma”
+• nagłówek produktu („Kantówki”, „Piasek rzeczny przesiewany”) bez firmy
+• „tak”/„nie”/statusy pipeline (sent, skipped_institution, no_suitable_email)
+Jeśli wejście to URL — wyprowadź nazwę TYLKO gdy da się ją pewnie odczytać z kontekstu Impressum/danych; NIGDY nie wymyślaj. Niepewność → "".
 
-WEJŚCIE
-company={company!r}
-address={address!r}
-phone={phone!r}
-email={email!r}
-website={website!r}
-handelsketten={handelsketten!r}
-url={url!r}
+═══ Excel — sztywny format kolumn ═══
+• address → wyłącznie fizyczny adres PL: „ul. Nazwa Nr, XX-XXX Miasto” albo ""; NIGDY województwo, NIGDY kategorie, NIGDY telefon/email
+• phone → DOKŁADNIE jeden numer PL (+48… lub 9 cyfr); bez „Tel./Fax”, bez drugiego numeru; inaczej ""
+• website → https://domena.pl (ROOT, bez /sklep /kontakt /pdf); inaczej ""
+• url → identycznie jak website (https://domena.pl)
+• bundesland → GENAU jedna wartość z: [{states}] — inaczej ""
+• handelsketten → małe litery, przecinek+spacja, TYLKO kategorie materiałów
+  (np. cement, piasek, styropian, wełna, chemia budowlana, drewno, armatura, kruszywa)
+  NIGDY „tak”/„nie”, NIGDY statusy, NIGDY URL
+• email_nur_info: NIE wstawiaj do JSON — tylko do sprawdzenia spójności z domeną
+
+NEGATYWNE PRZYKŁADY
+name="https://facebook.com/…" → company_name_clean="", website="", url=""
+name="https://sklep.lubar.pl" + realna firma znana → company_name_clean="Lubar …", website="https://lubar.pl", url="https://lubar.pl"
+address="mazowieckie" → address="", bundesland="mazowieckie"
+phone="Tel +48 22 111, Fax +48 22 222" → phone="+4822111…" (tylko pierwszy)
+handelsketten="styropian, wełna tak" → handelsketten="styropian, wełna"
+
+WEJŚCIE (oczyść / uzupełnij / wyzeruj śmieci)
+name={company}
+address={address}
+phone={phone}
+website={website}
+url={url}
+handelsketten={handelsketten}
+email_nur_info={email}
 """
 
 

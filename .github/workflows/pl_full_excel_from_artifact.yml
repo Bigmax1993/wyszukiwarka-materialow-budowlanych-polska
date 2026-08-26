@@ -1,0 +1,165 @@
+name: PL full Excel from GitHub artifact
+
+# Bierze najnowszy artefakt wyniki (nie maly Excel z Drive) i buduje
+# pelny pl_materialy_kontakte.xlsx ze WSZYSTKICH contacts, upload na Drive.
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_name:
+        description: "Artefakt (puste = najnowszy pi/fri/thu/mon/tue/rebuild)"
+        required: false
+        type: string
+      eligible_only:
+        description: "Tylko eligible (domyslnie: wszystkie kontakty z cache)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: pl-pipeline
+  cancel-in-progress: false
+
+env:
+  SCRAPER_TIMEZONE: Europe/Warsaw
+  KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+  GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
+  GDRIVE_FOLDER_ID_PL: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
+  GDRIVE_VERSION_XLSX: "0"
+  GDRIVE_APPEND_XLSX: "0"
+  GDRIVE_CONSOLIDATE_ALL_XLSX: "0"
+
+jobs:
+  rebuild-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-scraper
+
+      - name: Install Drive deps
+        run: pip install -r requirements-drive.txt ijson
+
+      - name: Resolve source artifact
+        id: art
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FORCED="${{ github.event.inputs.artifact_name }}"
+          ALL=$(gh api "repos/${{ github.repository }}/actions/artifacts" \
+            --paginate --jq '.artifacts[] | select(.expired==false)')
+          pick_latest() {
+            local name="$1"
+            echo "$ALL" | jq -s --arg n "$name" \
+              '[.[] | select(.name == $n)] | sort_by(.created_at) | reverse | .[0] // empty'
+          }
+          PICK=""
+          if [ -n "$FORCED" ]; then
+            PICK=$(pick_latest "$FORCED")
+          else
+            for NAME in pl-materialy-wyniki-pi pl-materialy-wyniki-fri pl-materialy-wyniki-thu pl-materialy-wyniki-mon pl-materialy-wyniki-tue pl-materialy-wyniki-rebuild-all pl-materialy-wyniki-rebuild; do
+              CAND=$(pick_latest "$NAME")
+              if [ -n "$CAND" ] && [ "$CAND" != "null" ]; then
+                PICK="$CAND"
+                break
+              fi
+            done
+          fi
+          if [ -z "$PICK" ] || [ "$PICK" = "null" ]; then
+            echo "::error::Brak artefaktu Wyniki"
+            exit 1
+          fi
+          echo "artifact=$(echo "$PICK" | jq -r '.name')" >> "$GITHUB_OUTPUT"
+          echo "run-id=$(echo "$PICK" | jq -r '.workflow_run.id')" >> "$GITHUB_OUTPUT"
+          echo "size=$(echo "$PICK" | jq -r '.size_in_bytes')" >> "$GITHUB_OUTPUT"
+          echo "Uzywam: $(echo "$PICK" | jq -r '.name') run=$(echo "$PICK" | jq -r '.workflow_run.id') size=$(echo "$PICK" | jq -r '.size_in_bytes')"
+
+      - name: Download Wyniki artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.art.outputs.artifact }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.art.outputs.run-id }}
+          path: .
+
+      - name: Count contacts + rebuild Excel (all rows)
+        env:
+          ELIGIBLE_ONLY: ${{ github.event.inputs.eligible_only }}
+        run: |
+          python - <<'PY'
+          import json, logging, os, sys
+          from pathlib import Path
+          ROOT = Path(".").resolve()
+          sys.path[:0] = [str(ROOT), str(ROOT / "libs"), str(ROOT / "scripts")]
+          logging.basicConfig(level=logging.INFO, format="%(message)s")
+          logger = logging.getLogger("full_excel")
+          import pl_materialy_scraper as scraper
+
+          cache_path = Path("Wyniki/pl_materialy_cache.json")
+          if not cache_path.is_file():
+              # czasem artefakt ma flat layout
+              hits = list(Path(".").rglob("pl_materialy_cache.json"))
+              if not hits:
+                  raise SystemExit("Brak pl_materialy_cache.json w artefakcie")
+              cache_path = hits[0]
+          print(f"CACHE={cache_path} size={cache_path.stat().st_size}")
+          scraper.CACHE_FILE = cache_path
+          scraper.OUTPUT_DIR = Path("Wyniki")
+          scraper.OUTPUT_DIR.mkdir(exist_ok=True)
+          scraper.OUTPUT_FILE = scraper.OUTPUT_DIR / "pl_materialy_kontakte.xlsx"
+
+          cache = scraper.load_cache(logger)
+          contacts = cache.get("contacts") or {}
+          print(f"contacts={len(contacts)}")
+          for k, v in sorted(cache.items(), key=lambda kv: -len(kv[1]) if isinstance(kv[1], dict) else 0)[:12]:
+              if isinstance(v, dict):
+                  print(f"  section {k}: {len(v)}")
+
+          existing, _ = scraper.load_existing_output(scraper.OUTPUT_FILE, logger)
+          rows = scraper.build_all_rows_from_cache(cache)
+          merged = scraper.merge_pipeline_rows(existing, rows)
+          eligible = (os.environ.get("ELIGIBLE_ONLY") or "").lower() == "true"
+          export = scraper.build_export_rows(merged, logger=logger, cache=cache, require_eligible=eligible)
+          print(f"pipeline={len(merged)} export={len(export)} eligible={eligible}")
+          with_mail = sum(1 for r in export if (r.get("E-mail") or "").strip())
+          print(f"with_email={with_mail}")
+          scraper.save_excel(merged, scraper.OUTPUT_FILE, logger, cache=cache, require_eligible=eligible)
+          print(f"WROTE {scraper.OUTPUT_FILE} bytes={scraper.OUTPUT_FILE.stat().st_size}")
+          PY
+
+      - name: Upload Excel to Google Drive
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
+          GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
+          GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
+          GDRIVE_IMPERSONATE_EMAIL: ${{ secrets.GDRIVE_IMPERSONATE_EMAIL }}
+          GDRIVE_SHARED_DRIVE_ID: ${{ secrets.GDRIVE_SHARED_DRIVE_ID }}
+        run: |
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          ROOT = Path(".").resolve()
+          sys.path[:0] = [str(ROOT), str(ROOT / "scripts")]
+          import gdrive_upload_wyniki as g
+          xlsx = Path("Wyniki/pl_materialy_kontakte.xlsx")
+          if not xlsx.is_file():
+              raise SystemExit("Brak Wyniki/pl_materialy_kontakte.xlsx")
+          creds, oauth = g._load_credentials()
+          service, Media = g._drive_service(creds)
+          folder = g._resolve_upload_folder(service, os.environ["GDRIVE_FOLDER_ID"], use_oauth=oauth)
+          os.environ["GDRIVE_VERSION_XLSX"] = "0"
+          g._upload_file(service, Media, xlsx, folder, version_xlsx=False)
+          print(f"Uploaded {xlsx.name} ({xlsx.stat().st_size} B) -> {folder}")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pl-materialy-full-excel-from-artifact
+          path: Wyniki/pl_materialy_kontakte.xlsx
+          if-no-files-found: warn

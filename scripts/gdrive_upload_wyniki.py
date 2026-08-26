@@ -434,11 +434,18 @@ def _canonical_sheet_name(name: str) -> str:
 
 
 def _normalize_export_row(rec: dict, scraper) -> dict:
-    """Polskie nagłówki + tak/nie w kolumnach bool; zachowuje dodatkowe kolumny (CRM)."""
+    """Polskie nagłówki + tak/nie; bez kolumn odpowiedzi/cen (PL materiały)."""
+    libs = ROOT / "libs"
+    if str(libs) not in sys.path:
+        sys.path.insert(0, str(libs))
+    from scraper_email_replies import is_reply_export_column
+
     row = scraper.normalize_excel_record_headers(rec or {})
     out: dict = {}
     for key, val in row.items():
         if str(key).startswith("_"):
+            continue
+        if is_reply_export_column(key):
             continue
         if key in _BOOL_EXPORT_COLS:
             parsed = scraper.parse_excel_bool(val)

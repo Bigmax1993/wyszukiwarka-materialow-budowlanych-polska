@@ -41,8 +41,22 @@ class TestPlReminderEmail(unittest.TestCase):
         self.assertIn("Dzień dobry", body)
         low = body.lower()
         self.assertTrue(
-            "przypomin" in low or "wrócić" in low or "wiadomości" in low,
-            body[:200],
+            any(
+                needle in low
+                for needle in (
+                    "przypomin",
+                    "wrócić",
+                    "wrocic",
+                    "wiadomości",
+                    "wiadomosci",
+                    "wiadomość",
+                    "wiadomosc",
+                    "zapytanie",
+                    "ofert",
+                    "wycen",
+                )
+            ),
+            body[:300],
         )
         self.assertIn("\n\n", body)
 

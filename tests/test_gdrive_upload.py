@@ -114,10 +114,12 @@ class GdriveSheetAppendTest(unittest.TestCase):
         self.assertEqual(len(bucket), 1)
         merged = next(iter(bucket.values()))
         self.assertEqual(merged["Telefon"], "500")
-        self.assertEqual(merged["Status maila"], "sent")
+        # Kolumny odpowiedzi/cen są usuwane już przy normalizacji wiersza.
+        self.assertNotIn("Status maila", merged)
         ordered = order_sheet_columns("Kontakte", [merged], scraper)
         self.assertEqual(ordered[0]["Nazwa firmy"], "A")
-        self.assertIn("Status maila", ordered[0])
+        self.assertNotIn("Status maila", ordered[0])
+        self.assertNotIn("Cena rel. 1", ordered[0])
 
 
 if __name__ == "__main__":

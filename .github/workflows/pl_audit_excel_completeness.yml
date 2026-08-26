@@ -31,15 +31,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           PICK=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
             --jq '[.artifacts[] | select(.expired==false and .name=="pl-materialy-wyniki-pi")] | sort_by(.created_at) | reverse | .[0]')
-          NAME=$(echo "$PICK" | jq -r '.name')
-          RUN_ID=$(echo "$PICK" | jq -r '.workflow_run.id')
-          SIZE=$(echo "$PICK" | jq -r '.size_in_bytes')
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
-          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
-          echo "PICKED name=$NAME run=$RUN_ID size=$SIZE"
+          NAME=$(printf '%s' "$PICK" | jq -r '.name' | tr -d '\r')
+          RUN_ID=$(printf '%s' "$PICK" | jq -r '.workflow_run.id' | tr -d '\r')
+          SIZE=$(printf '%s' "$PICK" | jq -r '.size_in_bytes' | tr -d '\r')
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "run-id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "size=${SIZE}" >> "$GITHUB_OUTPUT"
+          echo "PICKED name=${NAME} run=${RUN_ID} size=${SIZE}"
+          test -n "$NAME"
+          test -n "$RUN_ID"
 
       - name: Download wyniki-pi
         uses: actions/download-artifact@v4

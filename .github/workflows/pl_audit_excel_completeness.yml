@@ -1,0 +1,183 @@
+name: PL audit Excel completeness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: pl-pipeline
+  cancel-in-progress: false
+
+env:
+  SCRAPER_TIMEZONE: Europe/Warsaw
+  KANBUD_PROJECT_ROOT: ${{ github.workspace }}/libs
+  GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
+  GDRIVE_FOLDER_ID_PL: ${{ secrets.GDRIVE_FOLDER_ID_PL }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-scraper
+      - run: pip install -r requirements-drive.txt ijson pandas openpyxl
+
+      - name: Resolve latest wyniki-pi artifact
+        id: art
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PICK=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
+            --jq '[.artifacts[] | select(.expired==false and .name=="pl-materialy-wyniki-pi")] | sort_by(.created_at) | reverse | .[0]')
+          echo "name=$(echo "$PICK" | jq -r '.name')" >> "$GITHUB_OUTPUT"
+          echo "run-id=$(echo "$PICK" | jq -r '.workflow_run.id')" >> "$GITHUB_OUTPUT"
+          echo "size=$(echo "$PICK" | jq -r '.size_in_bytes')" >> "$GITHUB_OUTPUT"
+          echo "PICKED $(echo "$PICK" | jq -r '.name') run=$(echo "$PICK" | jq -r '.workflow_run.id')"
+
+      - name: Download wyniki-pi
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.art.outputs.name }}
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.art.outputs.run-id }}
+          path: artifact
+
+      - name: Audit Drive Excel vs artifact cache/excel
+        env:
+          GDRIVE_OAUTH_CLIENT_ID: ${{ secrets.GDRIVE_OAUTH_CLIENT_ID }}
+          GDRIVE_OAUTH_CLIENT_SECRET: ${{ secrets.GDRIVE_OAUTH_CLIENT_SECRET }}
+          GDRIVE_OAUTH_REFRESH_TOKEN: ${{ secrets.GDRIVE_OAUTH_REFRESH_TOKEN }}
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          GDRIVE_IMPERSONATE_EMAIL: ${{ secrets.GDRIVE_IMPERSONATE_EMAIL }}
+          GDRIVE_SHARED_DRIVE_ID: ${{ secrets.GDRIVE_SHARED_DRIVE_ID }}
+        run: |
+          python - <<'PY'
+          import os, sys, json, tempfile
+          from pathlib import Path
+          import pandas as pd
+          ROOT = Path('.').resolve()
+          sys.path[:0] = [str(ROOT), str(ROOT/'scripts'), str(ROOT/'libs')]
+          import gdrive_upload_wyniki as g
+          import pl_materialy_scraper as scraper
+          import logging
+          logging.basicConfig(level=logging.INFO, format='%(message)s')
+          logger = logging.getLogger('audit')
+
+          def count_xlsx(path):
+              xl = pd.ExcelFile(path)
+              out = {}
+              for s in xl.sheet_names:
+                  df = pd.read_excel(path, sheet_name=s)
+                  out[s] = {
+                      'rows': len(df),
+                      'cols': list(df.columns),
+                      'with_email': int((df['E-mail'].astype(str).str.strip()!='').sum()) if 'E-mail' in df.columns else None,
+                      'urls': set(df['URL'].astype(str).str.strip()) if 'URL' in df.columns else set(),
+                  }
+              return out
+
+          # --- artifact ---
+          art_cache = list(Path('artifact').rglob('pl_materialy_cache.json'))
+          art_xlsx = list(Path('artifact').rglob('pl_materialy_kontakte.xlsx'))
+          print('ARTIFACT_CACHE', [str(p) for p in art_cache])
+          print('ARTIFACT_XLSX', [str(p) for p in art_xlsx])
+
+          contacts_n = 0
+          contact_urls = set()
+          if art_cache:
+              scraper.CACHE_FILE = art_cache[0]
+              cache = scraper.load_cache(logger)
+              contacts = cache.get('contacts') or {}
+              contacts_n = len(contacts)
+              contact_urls = {str(u).strip() for u in contacts.keys() if str(u).strip()}
+              print('ARTIFACT_CONTACTS', contacts_n)
+              for k,v in sorted(((k,len(v)) for k,v in cache.items() if isinstance(v,dict)), key=lambda x:-x[1])[:10]:
+                  print(f'  cache_section {k}={v}')
+              rows_from_cache = scraper.build_all_rows_from_cache(cache)
+              print('ARTIFACT_CACHE_ROWS_PIPELINE', len(rows_from_cache))
+              export_all = scraper.build_export_rows(rows_from_cache, logger=logger, cache=cache, require_eligible=False)
+              export_elig = scraper.build_export_rows(rows_from_cache, logger=logger, cache=cache, require_eligible=True)
+              print('ARTIFACT_EXPORT_ALL', len(export_all), 'ELIGIBLE', len(export_elig))
+
+          art_xlsx_stats = None
+          art_urls = set()
+          if art_xlsx:
+              art_xlsx_stats = count_xlsx(art_xlsx[0])
+              print('ARTIFACT_XLSX_STATS', {k:{'rows':v['rows'],'with_email':v['with_email'],'ncols':len(v['cols'])} for k,v in art_xlsx_stats.items()})
+              art_urls = art_xlsx_stats.get('Kontakte', art_xlsx_stats.get('Kontakty', {})).get('urls', set())
+
+          # --- Drive ---
+          creds, oauth = g._load_credentials()
+          service, _ = g._drive_service(creds)
+          folder = g._resolve_upload_folder(service, os.environ['GDRIVE_FOLDER_ID'], use_oauth=oauth)
+          files = []
+          token=None
+          while True:
+              res=service.files().list(q=f"'{folder}' in parents and trashed=false", fields='nextPageToken,files(id,name,mimeType,modifiedTime,size)', pageSize=100, pageToken=token, corpora='allDrives', **g._LIST_OPTS).execute()
+              files.extend(res.get('files') or [])
+              token=res.get('nextPageToken')
+              if not token: break
+          print('DRIVE_FILES')
+          for f in sorted(files, key=lambda x: x.get('name') or ''):
+              print(f"  {f.get('name')} size={f.get('size')} modified={f.get('modifiedTime')} mime={f.get('mimeType')}")
+
+          xmeta = next((f for f in files if (f.get('name') or '')=='pl_materialy_kontakte.xlsx'), None)
+          cmeta = next((f for f in files if (f.get('name') or '')=='pl_materialy_cache.json'), None)
+
+          drive_urls=set(); drive_stats=None
+          if xmeta:
+              with tempfile.TemporaryDirectory() as td:
+                  p=Path(td)/'pl_materialy_kontakte.xlsx'
+                  g._download_drive_file(service, xmeta['id'], p)
+                  drive_stats=count_xlsx(p)
+                  print('DRIVE_XLSX_STATS', {k:{'rows':v['rows'],'with_email':v['with_email'],'ncols':len(v['cols'])} for k,v in drive_stats.items()})
+                  print('DRIVE_XLSX_COLS_KONTAKTE', drive_stats.get('Kontakte', drive_stats.get('Kontakty',{})).get('cols'))
+                  drive_urls = drive_stats.get('Kontakte', drive_stats.get('Kontakty', {})).get('urls', set())
+
+          drive_cache_contacts=None
+          if cmeta:
+              print('DRIVE_CACHE_SIZE', cmeta.get('size'))
+              # stream count only
+              try:
+                  import ijson
+                  with tempfile.TemporaryDirectory() as td:
+                      cp=Path(td)/'cache.json'
+                      g._download_drive_file(service, cmeta['id'], cp)
+                      n=0
+                      with open(cp,'rb') as f:
+                          for _ in ijson.kvitems(f,'contacts'):
+                              n+=1
+                      drive_cache_contacts=n
+                      print('DRIVE_CACHE_CONTACTS', n)
+              except Exception as e:
+                  print('DRIVE_CACHE_COUNT_FAIL', e)
+
+          # --- diffs ---
+          print('COMPARE')
+          print('  drive_xlsx_rows', len(drive_urls))
+          print('  artifact_xlsx_rows', len(art_urls))
+          print('  artifact_contacts', contacts_n)
+          only_art = sorted(art_urls - drive_urls)
+          only_drive = sorted(drive_urls - art_urls)
+          only_contacts = sorted(contact_urls - drive_urls)
+          print('  missing_on_drive_vs_artifact_xlsx', len(only_art))
+          print('  extra_on_drive_vs_artifact_xlsx', len(only_drive))
+          print('  contacts_missing_on_drive', len(only_contacts))
+          if only_art[:10]:
+              print('  SAMPLE_MISSING_VS_ART_XLSX', only_art[:10])
+          if only_contacts[:10]:
+              print('  SAMPLE_CONTACTS_MISSING', only_contacts[:10])
+
+          # verdict
+          ok_contacts = len(only_contacts)==0
+          ok_art = len(only_art)==0
+          print('VERDICT_CONTAINS_ALL_ARTIFACT_CONTACTS', ok_contacts)
+          print('VERDICT_CONTAINS_ALL_ARTIFACT_XLSX', ok_art)
+          if not (ok_contacts and ok_art):
+              raise SystemExit('INCOMPLETE: Drive Excel does not contain all source rows')
+          print('VERDICT_OK_ALL_KNOWN_SOURCES_PRESENT')
+          PY

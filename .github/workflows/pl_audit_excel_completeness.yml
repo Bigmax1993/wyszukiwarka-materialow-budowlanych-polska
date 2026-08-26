@@ -33,10 +33,13 @@ jobs:
         run: |
           PICK=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
             --jq '[.artifacts[] | select(.expired==false and .name=="pl-materialy-wyniki-pi")] | sort_by(.created_at) | reverse | .[0]')
-          echo "name=$(echo "$PICK" | jq -r '.name')" >> "$GITHUB_OUTPUT"
-          echo "run-id=$(echo "$PICK" | jq -r '.workflow_run.id')" >> "$GITHUB_OUTPUT"
-          echo "size=$(echo "$PICK" | jq -r '.size_in_bytes')" >> "$GITHUB_OUTPUT"
-          echo "PICKED $(echo "$PICK" | jq -r '.name') run=$(echo "$PICK" | jq -r '.workflow_run.id')"
+          NAME=$(echo "$PICK" | jq -r '.name')
+          RUN_ID=$(echo "$PICK" | jq -r '.workflow_run.id')
+          SIZE=$(echo "$PICK" | jq -r '.size_in_bytes')
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "PICKED name=$NAME run=$RUN_ID size=$SIZE"
 
       - name: Download wyniki-pi
         uses: actions/download-artifact@v4

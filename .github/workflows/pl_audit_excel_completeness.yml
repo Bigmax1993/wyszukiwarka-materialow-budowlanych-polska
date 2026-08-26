@@ -31,44 +31,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json, os, subprocess, sys
-          from pathlib import Path
-          repo = os.environ["GITHUB_REPOSITORY"]
-          raw = subprocess.check_output(
-              ["gh", "api", f"repos/{repo}/actions/artifacts", "--paginate"],
-              text=True,
-          )
-          # --paginate may concatenate multiple JSON arrays
-          arts = []
-          for chunk in raw.strip().split("\n"):
-              chunk = chunk.strip()
-              if not chunk:
-                  continue
-              data = json.loads(chunk)
-              if isinstance(data, list):
-                  arts.extend(data)
-              elif isinstance(data, dict) and "artifacts" in data:
-                  arts.extend(data["artifacts"])
-          cands = [
-              a for a in arts
-              if (not a.get("expired")) and a.get("name") == "pl-materialy-wyniki-pi"
-          ]
-          if not cands:
-              sys.exit("No pl-materialy-wyniki-pi artifact found")
-          cands.sort(key=lambda a: a.get("created_at") or "", reverse=True)
-          pick = cands[0]
-          run_id = pick["workflow_run"]["id"]
-          name = pick["name"]
-          print(f"PICKED name={name} run={run_id} size={pick.get('size_in_bytes')}")
-          Path("artifact").mkdir(exist_ok=True)
-          subprocess.check_call([
-              "gh", "run", "download", str(run_id),
-              "-n", name,
-              "-D", "artifact",
-              "-R", repo,
-          ])
-          PY
+          RUN_ID=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
+            --jq '.artifacts[] | select(.name=="pl-materialy-wyniki-pi" and .expired==false) | "\(.created_at)\t\(.workflow_run.id)"' \
+            | sort -r | head -n1 | cut -f2 | tr -d '\r\n')
+          echo "PICKED name=pl-materialy-wyniki-pi run=${RUN_ID}"
+          test -n "${RUN_ID}"
+          mkdir -p artifact
+          gh run download "${RUN_ID}" -n pl-materialy-wyniki-pi -D artifact -R "${{ github.repository }}"
 
       - name: Audit Drive Excel vs artifact cache/excel
         env:

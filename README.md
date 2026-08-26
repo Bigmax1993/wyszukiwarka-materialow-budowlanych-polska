@@ -10,9 +10,9 @@ Kampania siostrzana (Ukraina): [wyszukiwarka-materialow-budowlanych-ukraina](htt
 
 ## Pipeline
 
-**Serper (gl=pl) → crawl www → Claude verify (PL) → Excel → maile PL**
+**Serper (gl=pl) → crawl www → Claude verify (PL) → Excel → verify vs JSON → [refill braków] → maile PL / Drive**
 
-Szczegóły: [`docs/PL_MATERIALY.md`](docs/PL_MATERIALY.md)
+Szczegóły: [`docs/PL_MATERIALY.md`](docs/PL_MATERIALY.md) · Actions: [`docs/GITHUB_ACTIONS.md`](docs/GITHUB_ACTIONS.md) · Drive: [`docs/GOOGLE_DRIVE.md`](docs/GOOGLE_DRIVE.md)
 
 | Moduł | Plik |
 |-------|------|
@@ -22,10 +22,13 @@ Szczegóły: [`docs/PL_MATERIALY.md`](docs/PL_MATERIALY.md)
 | Filtr dostawców | `pl_materialy_supplier_filter.py` |
 | Prompty Claude PL | `pl_claude_prompts.py` |
 | Treść maila PL | `pl_materialy_inquiry_email_pl.py` |
+| Pełny Excel z cache | `scripts/rebuild_excel_full_from_cache.py` |
+| Verify Excel ↔ JSON | `scripts/verify_excel_from_json.py` |
+| Refill braków (API) | `scripts/refill_missing_excel_contacts.py` |
 
 Maile po polsku, tel. **516513965**, **bez załączników**.
 
-Wyniki: `Wyniki/pl_materialy_cache.json`, `pl_materialy_kontakte.xlsx`.
+Wyniki: `Wyniki/pl_materialy_cache.json`, `pl_materialy_kontakte.xlsx` (kolumny tylko PL).
 
 ---
 
@@ -53,7 +56,7 @@ Skopiuj `.env.example` → `.env` (lokalnie; na CI ustaw [GitHub Secrets](#githu
 $env:KANBUD_PROJECT_ROOT = "$PWD\libs"
 python pl_materialy_scraper.py --test
 python -m unittest tests.test_pl_materialy_regression -v
-python -m pytest tests/test_pl_inquiry_email_pl.py tests/test_pl_materialy_integration.py tests/test_repo_isolation.py -q
+python -m pytest tests/ -q
 ```
 
 Pełna bateria: `powershell -ExecutionPolicy Bypass -File scripts\RUN_ALL_TESTS.ps1`
@@ -69,9 +72,17 @@ Szczegóły: [`schedule/pl/PLAN_5_DNI_PL.md`](schedule/pl/PLAN_5_DNI_PL.md), [`d
 | Dzień | Godzina (Europe/Warsaw) | GitHub Actions |
 |-------|------------------------|----------------|
 | Pon–Pt | 22:00 / 20:00 / 00:00 / 01:00 / 21:00 | `PL discovery` |
-| Niedziela | 10:30 | `PL niedziela backfill` |
+| Niedziela | 10:30 | `PL niedziela backfill` (+ refill braków) |
 | Poniedziałek | 11:00 / 12:00 / 14:00 | sync Drive → prep → send |
 | Wtorek | 14:00 | `PL wtorek send` |
+
+Ręcznie (Excel / Drive):
+
+| Workflow | Po co |
+|----------|--------|
+| `PL full Excel from GitHub artifact` | Pełny Excel z crawl+cache → Drive |
+| `PL refill missing Excel contacts` | Dociągnięcie e-mail/telefon/adres (Serper+Claude) |
+| `CI Deploy` | Smoke + secrets + dry-run maili |
 
 Offset +5h względem UA — pipeline PL w **osobnym repo**, bez kolizji cron.
 
@@ -96,12 +107,13 @@ powershell -ExecutionPolicy Bypass -File scripts\run_full_pipeline_gha.ps1
 | Serper | 1000 zapytań / dzień |
 | E-mail | 300 / dzień, 2 / domena / dzień (pon + wt) |
 | Rotacja | 1 województwo / tydzień |
+| Refill (GHA) | domyślnie `limit=30`–`50` firm / run (`REFILL_MISSING_LIMIT`) |
 
 ---
 
 ## GitHub Actions
 
-8 workflowów: `pl_materialy_{pi,thu,mon,tue,fri}.yml`, `sync-google-drive-pl.yml`, `tests.yml`, `ci-deploy.yml`.
+Główne workflowy: discovery / backfill / prep / send / sync Drive / **full Excel** / **refill missing** / tests / CI Deploy.
 
 Concurrency: `pl-pipeline` (w tym repo).
 
@@ -129,9 +141,14 @@ Google Drive: [`docs/GOOGLE_DRIVE.md`](docs/GOOGLE_DRIVE.md)
 ├── pl_wojewodztwo_rotation.py
 ├── run_config/pl_materialy.json
 ├── schedule/pl/
-├── .github/workflows/pl_materialy_*.yml
+├── .github/workflows/          # discovery, backfill, full Excel, refill, CI…
 ├── docs/PL_MATERIALY.md
+├── docs/GITHUB_ACTIONS.md
+├── docs/GOOGLE_DRIVE.md
+├── scripts/rebuild_excel_full_from_cache.py
+├── scripts/verify_excel_from_json.py
+├── scripts/refill_missing_excel_contacts.py
 ├── scripts/run_full_pipeline_gha.ps1
-├── tests/test_pl_* + test_repo_isolation.py
+├── tests/
 └── Wyniki/
 ```

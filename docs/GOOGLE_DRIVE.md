@@ -12,13 +12,13 @@ Folder w chmurze: [PL Materialy Budowlane](https://drive.google.com/drive/folder
 |---------------|--------|
 | `pl_materialy_kontakte.xlsx` | **Google Drive** (jeden plik — append wierszy, bez kopii z datą) |
 | `wyslane/*.eml` | **Google Drive** (kopie wysłanych maili) |
-| `pl_materialy_cache.json` | **GitHub Actions** (artefakt `pl-materialy-wyniki-*`) |
+| `pl_materialy_cache.json` | **GitHub Actions** (artefakt `pl-materialy-wyniki-*`; duży — zawiera `website_crawl`) |
 | `pl_materialy_scraper.log` | **GitHub Actions** (artefakt) |
 | `pl_materialy_wojewodztwo_rotation.json` | **GitHub Actions** (artefakt) |
 
 | Sposób | Kiedy |
 |--------|--------|
-| **GitHub Actions** | Niedzielny backfill (`PL niedziela backfill`): upload → weryfikacja Excel vs JSON → ponowny upload. Dodatkowo poniedziałek 11:00 `Sync wyniki Google Drive PL`. |
+| **GitHub Actions** | Niedzielny backfill: upload → verify JSON → refill braków → re-upload. Poniedziałek 11:00 `Sync wyniki Google Drive PL`. Ręcznie: **PL full Excel** / **PL refill missing**. |
 | **Lokalnie** | `python scripts/gdrive_upload_wyniki.py --campaign pl` |
 | **PC + Drive for desktop** | `KANBUD_DATA_DIR` → folder `PL Materialy Budowlane Wyniki` |
 
@@ -30,7 +30,7 @@ Artefakt źródłowy sync: `pl-materialy-wyniki-thu` (niedzielny backfill). Szcz
 |---------|-----------|------|
 | `GDRIVE_VERSION_XLSX` | `0` | Bez kopii z datą — zawsze ten sam `pl_materialy_kontakte.xlsx` |
 | `GDRIVE_APPEND_XLSX` | `1` | Przed uploadem: pobierz Excel z Drive, dopisz nowe wiersze (po URL), nadpisz plik |
-| `GDRIVE_CONSOLIDATE_ALL_XLSX` | `1` | **Scala wszystkie** Excel z folderu Drive (`pl_materialy*kontakte*.xlsx` + kopie z datą) do jednego zbiorczego; nagłówki kolumn wyłącznie po polsku; usuwa stare kopie |
+| `GDRIVE_CONSOLIDATE_ALL_XLSX` | `1` | **Scala wszystkie** Excel z folderu Drive do jednego zbiorczego; nagłówki wyłącznie po polsku; usuwa stare kopie |
 
 Jednorazowe scalenie (wszystkie obecne pliki na Drive → jeden):
 
@@ -41,9 +41,37 @@ python scripts/consolidate_drive_xlsx_pl.py
 python scripts/consolidate_drive_xlsx_pl.py --dry-run
 ```
 
-Kolumny arkusza **Kontakte** (PL): Nazwa firmy, Adres, Województwo, Telefon, E-mail, Strona www, URL, Kategorie materiałów, WWW sprawdzone, Mała firma, Generalny wykonawca, Znacznik GU, Status (+ kolumny odpowiedzi mailowych po polsku).
+**Kolumny arkusza Kontakte (tylko PL — bez odpowiedzi/cen):**
 
-Stare pliki `pl_materialy_kontakte_2026-*_*.xlsx` są usuwane automatycznie przy consolidate (albo ręcznie z folderu Drive).
+Nazwa firmy, Adres, Województwo, Telefon, E-mail, Strona www, URL, Kategorie materiałów, WWW sprawdzone, Mała firma, Generalny wykonawca, Znacznik GU, Status.
+
+Usunięte na stałe z eksportu PL: Status maila, Wysłano, Odpowiedź, Cena, Waluta, Opis, Zadzwoń?, Cena rel*.
+
+### Skąd biorą się wiersze / pola
+
+| Źródło w `*_cache.json` | Co wnosi do Excela |
+|-------------------------|--------------------|
+| `contacts` | Pełne rekordy pipeline (często cienkie) |
+| `website_crawl` | E-mail, telefon, nazwa ze stron (główne źródło objętości) |
+| `claude_row_enrichment` | Adres, telefon, nazwa (uzupełnienie) |
+| `claude_page_verify` | Flagi verified / kategorie / GU |
+
+Po zapisie: `verify_excel_from_json.py` uzupełnia puste kolumny z JSON i **nadpisuje** plik.  
+Braki nadal puste → `refill_missing_excel_contacts.py` (Serper + crawl + Claude + `RELAXED_CONTACT_REGEX`).
+
+Pełny rebuild z artefaktu GHA:
+
+```powershell
+gh workflow run "PL full Excel from GitHub artifact" -R Bigmax1993/wyszukiwarka-materialow-budowlanych-polska
+```
+
+Uzupełnienie braków (API):
+
+```powershell
+gh workflow run "PL refill missing Excel contacts" -R Bigmax1993/wyszukiwarka-materialow-budowlanych-polska -f limit=30 -f upload_drive=true
+```
+
+Stare pliki `pl_materialy_kontakte_2026-*_*.xlsx` są usuwane przy consolidate (albo ręcznie z folderu Drive).
 
 ### Upload z GitHub Actions (OAuth)
 

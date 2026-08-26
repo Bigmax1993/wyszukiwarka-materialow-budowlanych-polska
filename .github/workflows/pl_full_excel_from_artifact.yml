@@ -89,6 +89,7 @@ jobs:
       - name: Count contacts + rebuild Excel (all rows + enrichment + verified)
         env:
           ELIGIBLE_ONLY: ${{ github.event.inputs.eligible_only }}
+          VERIFY_EXCEL_AFTER_SAVE: "0"
         run: |
           ARGS=""
           if [ "${ELIGIBLE_ONLY}" = "true" ]; then
@@ -104,10 +105,12 @@ jobs:
           print("Kontakte rows", len(df))
           print("with_email", sum(1 for v in df.get("E-mail", []) if str(v).strip()))
           print("with_address", sum(1 for v in df.get("Adres", []) if str(v).strip()))
+          print("with_phone", sum(1 for v in df.get("Telefon", []) if str(v).strip()))
           print("columns", list(df.columns))
           banned = ["Status maila", "Wysłano", "Odpowiedź", "Cena", "Waluta", "Opis", "Zadzwoń?"]
           bad = [c for c in df.columns if c in banned or str(c).startswith("Cena rel")]
           assert not bad, bad
+          assert len(df) >= 200, f"za malo wierszy: {len(df)} (oczekiwano crawl)"
           PY
 
       - name: Upload Excel to Google Drive

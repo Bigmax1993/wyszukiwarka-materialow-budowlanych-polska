@@ -21,6 +21,15 @@ def _s(value: Any) -> str:
     return str(value).strip()
 
 
+def normalize_url_key(url: str) -> str:
+    u = _s(url).lower().rstrip("/")
+    for prefix in ("https://www.", "http://www.", "https://", "http://"):
+        if u.startswith(prefix):
+            u = u[len(prefix) :]
+            break
+    return u.rstrip("/")
+
+
 def first_email_from_contact(info: dict) -> str:
     email = _s(info.get("email_target"))
     if email and "@" in email:
@@ -190,16 +199,6 @@ def excel_row_from_json(place_url: str, info: dict) -> dict:
     }
 
 
-def index_excel_by_url(export_rows: list[dict]) -> dict[str, dict]:
-    out: dict[str, dict] = {}
-    for rec in export_rows:
-        for key in (rec.get("URL"), rec.get("Strona www")):
-            url = _s(key)
-            if url and url not in out:
-                out[url] = rec
-    return out
-
-
 def json_field_for_excel_col(info: dict, col: str, place_url: str) -> str:
     if col == "Nazwa firmy":
         return (
@@ -230,6 +229,37 @@ def json_field_for_excel_col(info: dict, col: str, place_url: str) -> str:
     return ""
 
 
+def index_excel_by_url(export_rows: list[dict]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for rec in export_rows:
+        for key in (rec.get("URL"), rec.get("Strona www")):
+            url = _s(key)
+            nk = normalize_url_key(url)
+            if url and url not in out:
+                out[url] = rec
+            if nk and nk not in out:
+                out[nk] = rec
+    return out
+
+
+def dedupe_export_rows(export_rows: list[dict]) -> list[dict]:
+    """Jeden wiersz na znormalizowany URL; bogatszy wiersz wygrywa."""
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for rec in export_rows:
+        url = _s(rec.get("URL") or rec.get("Strona www"))
+        nk = normalize_url_key(url) or url or f"row:{id(rec)}"
+        if nk not in best:
+            best[nk] = dict(rec)
+            order.append(nk)
+            continue
+        cur = best[nk]
+        for col, val in rec.items():
+            if _s(val) and not _s(cur.get(col)):
+                cur[col] = val
+    return [best[k] for k in order]
+
+
 def find_excel_gaps(contacts: dict[str, dict], export_rows: list[dict]) -> list[dict]:
     """Luki: brak wiersza albo pusta kolumna Excela przy niepustym polu JSON."""
     by_url = index_excel_by_url(export_rows)
@@ -237,7 +267,7 @@ def find_excel_gaps(contacts: dict[str, dict], export_rows: list[dict]) -> list[
     for place_url, info in contacts.items():
         if not json_contact_has_needed_data(place_url, info):
             continue
-        rec = by_url.get(_s(place_url))
+        rec = by_url.get(_s(place_url)) or by_url.get(normalize_url_key(place_url))
         if rec is None:
             gaps.append({"url": _s(place_url), "reason": "missing_row", "columns": ["*"]})
             continue
@@ -262,11 +292,14 @@ def fill_export_from_json(contacts: dict[str, dict], export_rows: list[dict]) ->
         if not json_contact_has_needed_data(place_url, info):
             continue
         url = _s(place_url)
-        rec = by_url.get(url)
+        nk = normalize_url_key(url)
+        rec = by_url.get(url) or by_url.get(nk)
         if rec is None:
             rec = excel_row_from_json(place_url, info)
             export_rows.append(rec)
             by_url[url] = rec
+            if nk:
+                by_url[nk] = rec
             changed += 1
             continue
         filled = excel_row_from_json(place_url, info)
@@ -274,7 +307,7 @@ def fill_export_from_json(contacts: dict[str, dict], export_rows: list[dict]) ->
             if _s(val) and not _s(rec.get(col)):
                 rec[col] = val
                 changed += 1
-    return export_rows, changed
+    return dedupe_export_rows(export_rows), changed
 
 
 def verify_and_fill_until_complete(
@@ -285,6 +318,7 @@ def verify_and_fill_until_complete(
 ) -> tuple[list[dict], list[dict], int]:
     """Petla: weryfikacja calego Excela → JSON → uzupelnienie."""
     rounds = 0
+    export_rows = dedupe_export_rows(export_rows)
     gaps = find_excel_gaps(contacts, export_rows)
     while gaps and rounds < max_rounds:
         export_rows, _n = fill_export_from_json(contacts, export_rows)

@@ -1948,7 +1948,9 @@ def index_all_rows_by_domain(all_rows: list[dict]) -> dict[str, dict]:
     return out
 
 
-def row_from_cache_contact(place_url: str, info: dict) -> dict | None:
+def row_from_cache_contact(
+    place_url: str, info: dict, *, require_eligible: bool = True
+) -> dict | None:
     """Jeden rekord contacts JSON → wiersz pipeline (także bez e-mail)."""
     if not isinstance(info, dict):
         return None
@@ -1981,7 +1983,9 @@ def row_from_cache_contact(place_url: str, info: dict) -> dict | None:
         (info.get("verification_reason") or "").strip() == PENDING_WWW_VERIFY_REASON
         and not info.get("retail_verified")
     )
-    if not pending_www and not is_row_eligible_for_excel_export(row_probe):
+    if require_eligible and not pending_www and not is_row_eligible_for_excel_export(
+        row_probe
+    ):
         return None
     phone = (info.get("phones_found") or "").strip()
     if "," in phone:
@@ -2005,14 +2009,22 @@ def row_from_cache_contact(place_url: str, info: dict) -> dict | None:
 
 def merge_pipeline_rows(existing: list[dict], incoming: list[dict]) -> list[dict]:
     """Łączy wiersze pipeline po URL (incoming nadpisuje tylko niepuste pola)."""
+    from scripts.excel_from_json_validate import normalize_url_key
+
     by_url = index_all_rows_by_url(list(existing))
+    by_norm: dict[str, dict] = {}
+    for u, row in by_url.items():
+        nk = normalize_url_key(u)
+        if nk and nk not in by_norm:
+            by_norm[nk] = row
     merged = list(existing)
     for row in incoming:
         url = (row.get("url") or "").strip()
         if not url:
             continue
-        if url in by_url:
-            cur = by_url[url]
+        nk = normalize_url_key(url)
+        cur = by_url.get(url) or (by_norm.get(nk) if nk else None)
+        if cur is not None:
             for key, val in row.items():
                 if val is None:
                     continue
@@ -2021,9 +2033,11 @@ def merge_pipeline_rows(existing: list[dict], incoming: list[dict]) -> list[dict
                 if val == "" or val == [] or val == {}:
                     continue
                 cur[key] = val
-        else:
-            merged.append(row)
-            by_url[url] = row
+            continue
+        merged.append(row)
+        by_url[url] = row
+        if nk:
+            by_norm[nk] = row
     return merged
 
 

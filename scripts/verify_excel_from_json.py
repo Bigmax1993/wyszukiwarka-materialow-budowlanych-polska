@@ -195,6 +195,34 @@ def contacts_from_enrichment_and_verify(cache: dict) -> dict[str, dict]:
     return out
 
 
+def contacts_from_website_crawl_file(cache_path: Path, logger: logging.Logger) -> dict[str, dict]:
+    """Streamuj website_crawl z dysku (ijson) → mapa contacts bez page_text."""
+    try:
+        import ijson
+    except ImportError:
+        logger.warning("ijson niedostępny — pomijam website_crawl")
+        return {}
+    try:
+        from scripts.rebuild_excel_full_from_cache import aggregate_crawl_contact
+    except Exception as e:
+        logger.warning("aggregate_crawl_contact: %s", e)
+        return {}
+    out: dict[str, dict] = {}
+    try:
+        with cache_path.open("rb") as f:
+            for url, entry in ijson.kvitems(f, "website_crawl"):
+                info = aggregate_crawl_contact(url, entry)
+                if not info:
+                    continue
+                key = _cell(info.get("official_website") or url)
+                if key:
+                    out[key] = info
+    except Exception as e:
+        logger.warning("%s: website_crawl stream fail (%s)", cache_path.name, e)
+        return {}
+    return out
+
+
 def collect_needed_contacts(wyniki: Path, xlsx: Path, scraper, logger: logging.Logger) -> dict[str, dict]:
     merged: dict[str, dict] = {}
     for cache_path in sorted(wyniki.glob("*_cache.json")):
@@ -208,15 +236,19 @@ def collect_needed_contacts(wyniki: Path, xlsx: Path, scraper, logger: logging.L
             logger.warning("%s: stream cache fail (%s) — fallback recover", cache_path.name, e)
         if not recovered:
             recovered = recover_contacts_from_cache_file(cache_path)
+        crawl_contacts = contacts_from_website_crawl_file(cache_path, logger)
         logger.info(
-            "%s: contacts=%s enrich+verified=%s",
+            "%s: contacts=%s enrich+verified=%s crawl=%s",
             cache_path.name,
             len(recovered),
             len(extras),
+            len(crawl_contacts),
         )
         merged = merge_contacts_maps(merged, recovered)
         if extras:
             merged = merge_contacts_maps(merged, extras)
+        if crawl_contacts:
+            merged = merge_contacts_maps(merged, crawl_contacts)
     if xlsx.is_file():
         rows, _ = scraper.load_existing_output(xlsx, logger)
         excel_contacts = {}

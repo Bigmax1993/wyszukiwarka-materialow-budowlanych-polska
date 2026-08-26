@@ -436,17 +436,96 @@ SUPPRESSED_EMAIL_LOCALPARTS = {
     "mailer-daemon",
     "postmaster",
 }
+# Kanoniczne nagłówki Excela — wyłącznie po polsku (aliasy DE/EN przy imporcie).
 EXPORT_COLUMNS = [
-    "Firmenname",
-    "Adresse",
+    "Nazwa firmy",
+    "Adres",
     "Województwo",
     "Telefon",
-    "E-Mail",
-    "Webseite",
-    "Kategorie_materialow",
-    "WWW_geprueft",
-    "Kleinunternehmen",
+    "E-mail",
+    "Strona www",
+    "URL",
+    "Kategorie materiałów",
+    "WWW sprawdzone",
+    "Mała firma",
+    "Generalny wykonawca",
+    "Znacznik GU",
+    "Status",
 ]
+EXCEL_PL_YES = "tak"
+EXCEL_PL_NO = "nie"
+
+# Stare / obce nagłówki → kanoniczna polska nazwa kolumny (arkusz Kontakte).
+EXCEL_HEADER_ALIASES_TO_PL = {
+    "firmenname": "Nazwa firmy",
+    "company": "Nazwa firmy",
+    "company name": "Nazwa firmy",
+    "nazwa firmy": "Nazwa firmy",
+    "firma": "Nazwa firmy",
+    "adresse": "Adres",
+    "address": "Adres",
+    "adres": "Adres",
+    "bundesland": "Województwo",
+    "oblast": "Województwo",
+    "województwo": "Województwo",
+    "wojewodztwo": "Województwo",
+    "telefon": "Telefon",
+    "phone": "Telefon",
+    "e-mail": "E-mail",
+    "email": "E-mail",
+    "e-mail ": "E-mail",
+    "webseite": "Strona www",
+    "website": "Strona www",
+    "www": "Strona www",
+    "strona www": "Strona www",
+    "url": "URL",
+    "kategorie_materialow": "Kategorie materiałów",
+    "kategorie materiałów": "Kategorie materiałów",
+    "kategorie materialow": "Kategorie materiałów",
+    "www_geprueft": "WWW sprawdzone",
+    "www geprueft": "WWW sprawdzone",
+    "www geprüft": "WWW sprawdzone",
+    "www sprawdzone": "WWW sprawdzone",
+    "kleinunternehmen": "Mała firma",
+    "mala firma": "Mała firma",
+    "mała firma": "Mała firma",
+    "gu": "Generalny wykonawca",
+    "generalny wykonawca": "Generalny wykonawca",
+    "gu_marker": "Znacznik GU",
+    "znacznik gu": "Znacznik GU",
+    "status": "Status",
+}
+
+
+def excel_bool_pl(flag: bool) -> str:
+    return EXCEL_PL_YES if flag else EXCEL_PL_NO
+
+
+def parse_excel_bool(raw) -> bool | None:
+    v = str(raw or "").strip().lower()
+    if v in ("tak", "ja", "yes", "true", "1"):
+        return True
+    if v in ("nie", "nein", "no", "false", "0"):
+        return False
+    return None
+
+
+def normalize_excel_record_headers(rec: dict) -> dict:
+    """Mapuje obce/stare nagłówki kolumn na kanoniczne polskie nazwy."""
+    out: dict = {}
+    for key, val in (rec or {}).items():
+        raw = str(key or "").strip()
+        if not raw or raw.startswith("_"):
+            out[raw] = val
+            continue
+        canon = EXCEL_HEADER_ALIASES_TO_PL.get(raw.lower())
+        if canon:
+            # Pierwsza niepusta wartość wygrywa przy kolizji aliasów.
+            if canon not in out or not str(out.get(canon) or "").strip():
+                out[canon] = val
+        else:
+            out[raw] = val
+    return out
 PL_WOJEWODZTWA = [
     "mazowieckie", "malopolskie", "slaskie", "wielkopolskie", "dolnoslaskie",
     "pomorskie", "lodzkie", "zachodniopomorskie", "lubelskie", "podkarpackie",
@@ -770,13 +849,23 @@ def build_excel_info_sheet_rows() -> list[dict]:
         },
         {
             "Temat": "Arkusze",
-            "Wartość": "Info (ten arkusz) | Kontakte (firmy) | Wojewodztwa (podsumowanie landów)",
+            "Wartość": (
+                "Info (ten arkusz) | Kontakte (firmy) | Wojewodztwa (podsumowanie województw). "
+                "Nagłówki kolumn wyłącznie po polsku."
+            ),
         },
         {
             "Temat": "Cache JSON",
             "Wartość": (
-                "Osobny plik de_gu_bauunternehmen_cache.json — kumulacja tygodniowa; "
+                "Osobny plik pl_materialy_cache.json — kumulacja tygodniowa; "
                 "reset cache ≠ kasowanie Excela (chyba że świadomie usuniesz plik .xlsx)."
+            ),
+        },
+        {
+            "Temat": "Google Drive — jeden plik",
+            "Wartość": (
+                "Wszystkie pliki Excel z folderu Drive są scalane (append wierszy po URL) "
+                "do jednego pl_materialy_kontakte.xlsx; stare kopie z datą są usuwane."
             ),
         },
     ]
@@ -1317,7 +1406,7 @@ def row_to_excel_kontakte_columns(row: dict, email: str = "") -> dict:
         "E-mail": mail,
         "Strona www": website,
         "URL": (row.get("url") or website_base_url(website) or "").strip(),
-        "Kategorie_materialow": (row.get("retail_chains_found") or "").strip(),
+        "Kategorie materiałów": (row.get("retail_chains_found") or "").strip(),
     }
 
 
@@ -1566,10 +1655,12 @@ def build_export_rows(rows, logger=None, cache=None, require_eligible=True):
             table_cols = row_to_excel_kontakte_columns(row, email)
         base = {
             **table_cols,
-            "WWW_geprueft": "ja" if row.get("retail_verified") else "nein",
-            "Kleinunternehmen": "ja" if row.get("is_small_firm") else "nein",
-            "GU": "ja" if row.get("is_gu") or _row_has_gu_signal(row) else "nein",
-            "GU_Marker": (row.get("gu_marker") or "").strip(),
+            "WWW sprawdzone": excel_bool_pl(bool(row.get("retail_verified"))),
+            "Mała firma": excel_bool_pl(bool(row.get("is_small_firm"))),
+            "Generalny wykonawca": excel_bool_pl(
+                bool(row.get("is_gu") or _row_has_gu_signal(row))
+            ),
+            "Znacznik GU": (row.get("gu_marker") or "").strip(),
             "Status": _excel_status_label(row),
         }
         if cache is not None and email:
@@ -1620,18 +1711,25 @@ EXCEL_IMPORT_COLUMNS = {
     "Nazwa firmy": "nazwa",
     "Adres": "adres",
     "Województwo": "bundesland",
-    "Oblast": "bundesland",
     "Telefon": "telefon",
     "E-mail": "email_target",
     "Strona www": "www",
     "URL": "url",
-    "GU_Marker": "gu_marker",
+    "Znacznik GU": "gu_marker",
     "Status": "email_status",
 }
 
 
+def _excel_cell(rec: dict, *names: str) -> str:
+    for name in names:
+        if name in rec and str(rec.get(name) or "").strip():
+            return str(rec.get(name)).strip()
+    return ""
+
+
 def row_from_excel_record(rec: dict) -> dict:
-    """Mapuje polskie nagłówki z Excela na pola wewnętrzne scrapera."""
+    """Mapuje polskie nagłówki z Excela (i aliasy DE/EN) na pola scrapera."""
+    rec = normalize_excel_record_headers(rec)
     row: dict = {}
     for col_pl, field in EXCEL_IMPORT_COLUMNS.items():
         for key in (col_pl, field):
@@ -1649,25 +1747,31 @@ def row_from_excel_record(rec: dict) -> dict:
         row["phones_found"] = row["telefon"]
     if row.get("www"):
         row["official_website"] = row["www"]
-    www_checked = str(rec.get("WWW_geprueft") or "").strip().lower()
-    if www_checked == "ja":
+    www_flag = parse_excel_bool(_excel_cell(rec, "WWW sprawdzone", "WWW_geprueft"))
+    if www_flag is True:
         row["retail_verified"] = True
-    elif www_checked == "nein":
+    elif www_flag is False:
         row["retail_verified"] = False
         if not (row.get("email_target") or "").strip():
             row["verification_reason"] = PENDING_WWW_VERIFY_REASON
             row["email_status"] = "pending_www_verify"
-    gu_col = str(rec.get("GU") or "").strip().lower()
-    if gu_col == "ja":
+    gu_flag = parse_excel_bool(
+        _excel_cell(rec, "Generalny wykonawca", "GU")
+    )
+    if gu_flag is True:
         row["is_gu"] = True
-    elif gu_col == "nein":
+    elif gu_flag is False:
         row["is_gu"] = False
-    small_col = str(rec.get("Kleinunternehmen") or "").strip().lower()
-    if small_col == "ja":
+    small_flag = parse_excel_bool(
+        _excel_cell(rec, "Mała firma", "Kleinunternehmen")
+    )
+    if small_flag is True:
         row["is_small_firm"] = True
-    elif small_col == "nein":
+    elif small_flag is False:
         row["is_small_firm"] = False
-    chains = str(rec.get("Kategorie_materialow") or "").strip()
+    chains = _excel_cell(
+        rec, "Kategorie materiałów", "Kategorie_materialow"
+    )
     if chains:
         row["retail_chains_found"] = chains
     return row

@@ -265,15 +265,18 @@ def mentions_retail_store_build_activity(text: str) -> bool:
 
 def is_serper_only_pending_candidate(
     *,
+    email: str = "",
     name: str = "",
     url: str = "",
     text: str = "",
     search_term: str = "",
 ) -> bool:
-    blob = _blob(name, url, text, search_term)
-    if is_media_publisher_contact(url=url, name=name, text=blob):
+    blob = _blob(name, url, text, search_term, email)
+    if is_non_commercial_contact(email=email, url=url, name=name):
         return False
-    if is_retail_store_operator_contact(url=url, name=name, text=blob):
+    if is_media_publisher_contact(url=url, name=name, text=blob, email=email):
+        return False
+    if is_retail_store_operator_contact(url=url, name=name, text=blob, email=email):
         return False
     if is_excluded_non_gu_role(blob):
         return False
@@ -288,7 +291,7 @@ def is_loose_serper_discovery_candidate(
     search_term: str = "",
 ) -> bool:
     return is_serper_only_pending_candidate(
-        name=name, url=url, text=text, search_term=search_term
+        email="", name=name, url=url, text=text, search_term=search_term
     )
 
 

@@ -59,7 +59,7 @@ jobs:
           if [ -n "$FORCED" ]; then
             PICK=$(pick_latest "$FORCED")
           else
-            for NAME in pl-materialy-wyniki-thu pl-materialy-wyniki-mon pl-materialy-wyniki-tue pl-materialy-wyniki-fri pl-materialy-wyniki-pi; do
+            for NAME in pl-materialy-wyniki-refill pl-materialy-wyniki-thu pl-materialy-wyniki-mon pl-materialy-wyniki-tue pl-materialy-wyniki-fri pl-materialy-wyniki-pi; do
               CAND=$(pick_latest "$NAME")
               if [ -n "$CAND" ] && [ "$CAND" != "null" ]; then
                 PICK="$CAND"

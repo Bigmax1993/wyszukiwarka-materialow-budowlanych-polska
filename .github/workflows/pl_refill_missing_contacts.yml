@@ -18,9 +18,14 @@ on:
         description: "Artefakt źródłowy (puste = najnowszy full/pi/thu)"
         required: false
         type: string
+      chain_rebuild:
+        description: "Po refill uruchom PL rebuild Excel (cache + filtr HTTPS)"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
@@ -133,3 +138,17 @@ jobs:
           path: |
             Wyniki/
           if-no-files-found: warn
+
+      - name: Chain PL rebuild Excel
+        if: success() && github.event.inputs.chain_rebuild != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          UPLOAD="true"
+          if [ "${{ github.event.inputs.upload_drive }}" = "false" ]; then
+            UPLOAD="false"
+          fi
+          gh workflow run "PL rebuild Excel" -R "$GITHUB_REPOSITORY" \
+            -f artifact_name=pl-materialy-wyniki-refill \
+            -f upload_drive="$UPLOAD"
+          echo "Zlecono PL rebuild Excel (artefakt pl-materialy-wyniki-refill, upload_drive=$UPLOAD)."
